@@ -108,6 +108,15 @@ h1 { margin-bottom: 9px; font-family: Georgia, ui-serif, serif; font-size: clamp
 code { color: var(--accent); font-size: .95em; }
 .note-document-actions { display: flex; gap: 8px; padding: 10px 17px 0; }
 .note-document-actions .button { min-height: 32px; font-size: 11px; }
+.note-formatting-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 17px; border-bottom: 1px solid var(--border); }
+.formatting-group { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.note-formatting-toolbar .button { min-height: 30px; padding: 0 9px; font-size: 11px; }
+.formatting-control { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.formatting-control select, #note-reference-target, #bible-reference-input { min-height: 30px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px; background: #131923; color: var(--text); font-size: 11px; }
+.formatting-control input[type="color"] { width: 30px; height: 30px; padding: 3px; border: 1px solid var(--border); border-radius: 6px; background: #131923; cursor: pointer; }
+#note-reference-target { max-width: 190px; }
+#bible-reference-input { width: 130px; }
+.formatted-editor mark { padding: 0 .14em; border-radius: 2px; background: #6b5422; color: #fff4d1; }
 .height-resizer { position: relative; z-index: 1; height: 12px; cursor: row-resize; touch-action: none; user-select: none; }
 .height-resizer::after { position: absolute; top: 5px; left: 50%; width: 42px; height: 2px; content: ""; transform: translateX(-50%); background: var(--border); }
 .height-resizer:hover::after, .height-resizer:focus-visible::after, .height-resizer.dragging::after { background: var(--accent); }
@@ -140,10 +149,11 @@ code { color: var(--accent); font-size: .95em; }
 .formatted-editor .wiki-link { display: inline-block; }
 .markdown-preview { min-width: 0; padding: 19px; color: #c6cdd6; font-family: Georgia, ui-serif, serif; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
 .markdown-preview h1, .markdown-preview h2, .markdown-preview h3 { margin: 13px 0 8px; color: var(--text); font-family: Georgia, ui-serif, serif; }
-.markdown-preview h1 { font-size: 22px; }
+.markdown-preview h1 { font-size: 22px; font-weight: 700; }
 .markdown-preview h2 { font-size: 18px; }
 .markdown-preview h3 { font-size: 15px; }
 .markdown-preview p { margin-bottom: 10px; }
+.markdown-preview.formatted-editor p { margin-bottom: 0; }
 .markdown-preview .note-image { display: block; max-width: 100%; max-height: 520px; margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; object-fit: contain; }
 .markdown-preview .preview-quote { padding-left: 12px; border-left: 2px solid var(--accent); color: var(--muted); }
 .wiki-link { padding: 1px 3px; border: 0; border-bottom: 1px solid rgba(201, 168, 117, .45); background: var(--accent-soft); color: #e2c99f; cursor: pointer; font: inherit; }

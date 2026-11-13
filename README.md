@@ -29,6 +29,7 @@ The workflow at `.github/workflows/pages.yml` publishes only `frontend/` and ena
 1. Open the deployed Pages URL and sign in with an account and password created in Supabase.
 2. Choose **Import local notes** and select the local `notes/` folder. This copies Markdown notes and image attachments into the signed-in Supabase account. Existing notes with the same path are skipped. The importer does not delete or modify the local originals.
 3. The app keeps each account's notes separate with database and Storage row-level security policies.
+4. The note editor toolbar supports note and Bible passage cross-references, bold, italics, underline, highlighting, strikethrough, text color, headings, and ordered or bulleted lists. Formatting is saved with each note.
 
 Images are uploaded to a private Supabase Storage bucket. The upload page supports camera and gallery selection, attaching pages to existing notes, and transcription. Gemini receives images only when its Edge Function secret is configured; otherwise a browser OCR engine is loaded on demand. The original images stay in your private storage.
 

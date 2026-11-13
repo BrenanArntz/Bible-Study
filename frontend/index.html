@@ -158,6 +158,37 @@
                 <button class="button button-quiet" id="photos-toggle" type="button" hidden>Show photos</button>
                 <button class="button button-quiet" id="source-toggle" type="button" hidden>Show note source</button>
               </div>
+              <div class="note-formatting-toolbar" id="note-formatting-toolbar" role="toolbar" aria-label="Note formatting" hidden>
+                <div class="formatting-group" aria-label="Text formatting">
+                  <button class="button button-quiet" type="button" data-editor-command="bold" aria-label="Bold" title="Bold"><strong>B</strong></button>
+                  <button class="button button-quiet" type="button" data-editor-command="italic" aria-label="Italic" title="Italic"><em>I</em></button>
+                  <button class="button button-quiet" type="button" data-editor-wrap="underline" aria-label="Underline" title="Underline"><u>U</u></button>
+                  <button class="button button-quiet" type="button" data-editor-wrap="highlight" aria-label="Highlight" title="Highlight"><mark>H</mark></button>
+                  <button class="button button-quiet" type="button" data-editor-command="strikeThrough" aria-label="Strikethrough" title="Strikethrough"><s>S</s></button>
+                  <button class="button button-quiet" type="button" data-editor-command="insertUnorderedList" aria-label="Bulleted list" title="Bulleted list">Bullets</button>
+                  <button class="button button-quiet" type="button" data-editor-command="insertOrderedList" aria-label="Numbered list" title="Numbered list">Numbered</button>
+                  <label class="formatting-control">
+                    <span>Text Type</span>
+                    <select id="note-heading-format" aria-label="Block style">
+                      <option value="P" selected>Text</option>
+                      <option value="H1">Heading 1</option>
+                      <option value="H2">Heading 2</option>
+                    </select>
+                  </label>
+                  <label class="formatting-control">
+                    <span>Color</span>
+                    <input id="note-text-color" type="color" value="#e2c99f" aria-label="Text color">
+                  </label>
+                </div>
+                <div class="formatting-group" aria-label="Cross-references">
+                  <select id="note-reference-target" aria-label="Choose a note to cross-reference">
+                    <option value="">Choose a note…</option>
+                  </select>
+                  <button class="button button-quiet" id="insert-note-reference" type="button">Link note</button>
+                  <input id="bible-reference-input" type="text" placeholder="e.g. John 3:16" aria-label="Bible passage to cross-reference">
+                  <button class="button button-quiet" id="insert-bible-reference" type="button">Link passage</button>
+                </div>
+              </div>
               <section class="note-extra-panel" id="photos-panel" aria-label="Attached photos" hidden>
                 <div class="note-photos" id="note-photos"></div>
               </section>

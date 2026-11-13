@@ -13,6 +13,7 @@ const state = {
   noteAttachments: [],
   pendingImageReplacement: null,
   imageActionInProgress: false,
+  editorSelection: null,
   passageRequestId: 0,
   paneResize: null,
   heightResize: null,
@@ -32,6 +33,13 @@ const elements = {
   noteTitle: document.querySelector("#note-title"),
   notePath: document.querySelector("#note-path"),
   editor: document.querySelector("#note-editor"),
+  formattingToolbar: document.querySelector("#note-formatting-toolbar"),
+  headingFormat: document.querySelector("#note-heading-format"),
+  textColor: document.querySelector("#note-text-color"),
+  noteReferenceTarget: document.querySelector("#note-reference-target"),
+  insertNoteReference: document.querySelector("#insert-note-reference"),
+  bibleReferenceInput: document.querySelector("#bible-reference-input"),
+  insertBibleReference: document.querySelector("#insert-bible-reference"),
   photosToggle: document.querySelector("#photos-toggle"),
   photosPanel: document.querySelector("#photos-panel"),
   notePhotos: document.querySelector("#note-photos"),
@@ -109,6 +117,10 @@ const bibleReferencePattern = new RegExp(
   `\\b(${bibleBookNames.join("|")})(?![a-z])\\s+(\\d{1,3}(?:\\s*:\\s*\\d+(?:\\s*[-–]\\s*\\d+)?)?)`,
   "i",
 );
+const bibleBookDisplayNames = new Map([
+  ["jn", "John"],
+  ["john", "John"],
+]);
 
 async function requestJson(url, options = {}) {
   return apiRequest(url, options);
@@ -188,12 +200,37 @@ function renderFileList(folder) {
 
 function renderVault(payload) {
   state.folders = payload.folders || [];
+  updateNoteReferenceOptions();
   renderFolderCards();
   if (!state.activeFolder && state.folders.length) {
     selectFolder("exegesis");
   } else if (state.activeFolder) {
     selectFolder(state.activeFolder);
   }
+}
+
+function updateNoteReferenceOptions() {
+  const selectedPath = elements.noteReferenceTarget.value;
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choose a note…";
+  elements.noteReferenceTarget.replaceChildren(placeholder);
+
+  const notes = state.folders.flatMap((folder) => (
+    (folder.files || [])
+      .filter((note) => note.path !== state.activeNotePath)
+      .map((note) => ({ folder, note }))
+  ));
+  for (const { folder, note } of notes) {
+    const option = document.createElement("option");
+    option.value = note.path;
+    option.textContent = `${folder.name} · ${note.name.replace(/\.md$/i, "")}`;
+    elements.noteReferenceTarget.append(option);
+  }
+  elements.noteReferenceTarget.value = notes.some(({ note }) => note.path === selectedPath)
+    ? selectedPath
+    : "";
+  elements.noteReferenceTarget.disabled = notes.length === 0;
 }
 
 async function loadVault() {
@@ -224,6 +261,9 @@ async function openNote(path) {
   try {
     const note = await requestJson(`/api/note/${encodePath(path)}`);
     state.activeNotePath = note.path;
+    state.editorSelection = null;
+    elements.formattingToolbar.hidden = false;
+    updateNoteReferenceOptions();
     const title = note.title || path.split("/").at(-1).replace(/\.md$/i, "");
     state.noteRawContent = note.content;
     state.noteTitle = title;
@@ -273,9 +313,15 @@ async function openNote(path) {
 
 function findBibleReference(text) {
   const match = text.match(bibleReferencePattern);
-  return match
-    ? match[0].replace(/\s+/g, " ").replace(/\s*:\s*/g, ":").trim()
-    : "";
+  if (!match) return "";
+  const book = match[1].replace(/\s+/g, " ").replace(/\./g, "").trim();
+  const displayName = bibleBookDisplayNames.get(book.toLowerCase()) || book;
+  const passage = match[2]
+    .replace(/\s+/g, " ")
+    .replace(/\s*:\s*/g, ":")
+    .replace(/\s*([–-])\s*/g, "$1")
+    .trim();
+  return `${displayName} ${passage}`;
 }
 
 function resolveBibleReference(note) {
@@ -510,6 +556,177 @@ function encodePath(path) {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
+function rememberEditorSelection() {
+  const selection = window.getSelection();
+  if (
+    selection?.rangeCount
+    && elements.editor.contains(selection.anchorNode)
+    && elements.editor.contains(selection.focusNode)
+  ) {
+    state.editorSelection = selection.getRangeAt(0).cloneRange();
+  }
+}
+
+document.addEventListener("selectionchange", rememberEditorSelection);
+
+function restoreEditorSelection() {
+  const selection = window.getSelection();
+  if (!selection) return null;
+  elements.editor.focus();
+  if (state.editorSelection && elements.editor.contains(state.editorSelection.commonAncestorContainer)) {
+    selection.removeAllRanges();
+    selection.addRange(state.editorSelection);
+  }
+  return selection.rangeCount
+    && elements.editor.contains(selection.anchorNode)
+    && elements.editor.contains(selection.focusNode)
+    ? selection
+    : null;
+}
+
+function editorBlockFor(node) {
+  const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  return element?.closest("p, li, h1, h2, h3, blockquote") || null;
+}
+
+function editorBlockAtBoundary(container, offset, isEnd) {
+  if (container !== elements.editor) return editorBlockFor(container);
+  const child = elements.editor.childNodes[isEnd ? offset - 1 : offset];
+  return child instanceof Element && child.matches("p, li, h1, h2, h3, blockquote")
+    ? child
+    : null;
+}
+
+function normalizeInlineRange(range) {
+  const startBlock = editorBlockAtBoundary(range.startContainer, range.startOffset, false);
+  const endBlock = editorBlockAtBoundary(range.endContainer, range.endOffset, true);
+  if (startBlock && endBlock && startBlock !== endBlock) return null;
+  const block = startBlock || endBlock;
+  if (block && range.startContainer === elements.editor) range.setStart(block, 0);
+  if (block && range.endContainer === elements.editor) range.setEnd(block, block.childNodes.length);
+  if (range.cloneContents().querySelector("p, li, h1, h2, h3, blockquote, ul, ol, div")) return null;
+  return range;
+}
+
+function wrapEditorSelection(tagName, color = "") {
+  const selection = restoreEditorSelection();
+  if (!selection?.rangeCount || selection.isCollapsed) {
+    showToast("Select text in the note first.", true);
+    return;
+  }
+  const range = normalizeInlineRange(selection.getRangeAt(0).cloneRange());
+  if (!range) {
+    showToast("Select text within one paragraph or list item.", true);
+    return;
+  }
+  const wrapper = document.createElement(tagName);
+  if (tagName === "span") {
+    wrapper.style.color = color;
+    wrapper.dataset.textColor = color.toLowerCase();
+  }
+  wrapper.append(range.extractContents());
+  range.insertNode(wrapper);
+  const formattedRange = document.createRange();
+  formattedRange.selectNodeContents(wrapper);
+  selection.removeAllRanges();
+  selection.addRange(formattedRange);
+  state.editorSelection = formattedRange.cloneRange();
+}
+
+function insertEditorReference(target, label, isBibleReference = false) {
+  const selection = restoreEditorSelection();
+  if (!selection?.rangeCount) {
+    showToast("Click in the note where you want to insert the cross-reference.", true);
+    return;
+  }
+  const originalRange = selection.getRangeAt(0);
+  const range = originalRange.collapsed
+    ? originalRange.cloneRange()
+    : normalizeInlineRange(originalRange.cloneRange());
+  if (!range) {
+    showToast("Select reference text within one paragraph or list item.", true);
+    return;
+  }
+  const selectedLabel = range.toString().replace(/\s+/g, " ").trim();
+  const linkLabel = selectedLabel || label;
+  const link = document.createElement("span");
+  link.className = "wiki-link";
+  link.contentEditable = "false";
+  link.textContent = linkLabel;
+  if (isBibleReference) {
+    link.classList.add("bible-link");
+    link.dataset.bibleref = target.slice("bible:".length);
+    link.title = `Look up ${link.dataset.bibleref}`;
+  } else {
+    link.dataset.wikilink = `${target}|${linkLabel}`;
+    link.title = `Open note ${linkLabel}`;
+  }
+  link.addEventListener("click", () => followWikilink(target));
+  range.deleteContents();
+  range.insertNode(link);
+  const caret = document.createRange();
+  caret.setStartAfter(link);
+  caret.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(caret);
+  state.editorSelection = caret.cloneRange();
+}
+
+function applyEditorList(tagName) {
+  const selection = restoreEditorSelection();
+  if (!selection?.rangeCount) {
+    showToast("Click in the note where you want the list.", true);
+    return;
+  }
+  const range = selection.getRangeAt(0);
+  const startBlock = editorBlockAtBoundary(range.startContainer, range.startOffset, false);
+  const endBlock = editorBlockAtBoundary(range.endContainer, range.endOffset, true);
+  if (startBlock && endBlock && startBlock !== endBlock) {
+    showToast("Format one paragraph or list item at a time.", true);
+    return;
+  }
+  const block = startBlock || endBlock;
+  if (!block) {
+    showToast("Click in a paragraph or list item first.", true);
+    return;
+  }
+  if (block.closest("blockquote")) {
+    showToast("Lists inside quotations are not supported.", true);
+    return;
+  }
+
+  const currentList = block.tagName === "LI" ? block.parentElement : null;
+  let targetBlock = block;
+  if (currentList?.tagName.toLowerCase() === tagName) {
+    const paragraphs = [...currentList.children].map((item) => {
+      const paragraph = document.createElement("p");
+      while (item.firstChild) paragraph.append(item.firstChild);
+      return paragraph;
+    });
+    currentList.replaceWith(...paragraphs);
+    targetBlock = paragraphs[0];
+  } else if (currentList) {
+    const convertedList = document.createElement(tagName);
+    while (currentList.firstChild) convertedList.append(currentList.firstChild);
+    currentList.replaceWith(convertedList);
+  } else {
+    const list = document.createElement(tagName);
+    const item = document.createElement("li");
+    while (block.firstChild) item.append(block.firstChild);
+    list.append(item);
+    block.replaceWith(list);
+    targetBlock = item;
+  }
+
+  if (targetBlock) {
+    const targetRange = document.createRange();
+    targetRange.selectNodeContents(targetBlock);
+    selection.removeAllRanges();
+    selection.addRange(targetRange);
+    state.editorSelection = targetRange.cloneRange();
+  }
+}
+
 function extractNoteAttachments(content) {
   const attachments = new Map();
   const pattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -578,22 +795,44 @@ function getEditableMarkdown(content) {
 }
 
 function appendFormattedInline(parent, text) {
-  const pattern = /\[\[([^\]]+)\]\]|\*\*([^*]+)\*\*|\*([^*\n]+)\*|`([^`\n]+)`/g;
+  const pattern = /\[\[([^\]]+)\]\]|\*\*([^*]+)\*\*|~~([\s\S]+?)~~|\*([^*\n]+)\*|`([^`\n]+)`|<u>([\s\S]+?)<\/u>|<mark>([\s\S]+?)<\/mark>|<span style="color:\s*(#[0-9a-f]{6});?">([\s\S]+?)<\/span>/gi;
   let cursor = 0;
   for (const match of text.matchAll(pattern)) {
     parent.append(document.createTextNode(text.slice(cursor, match.index)));
     if (match[1]) {
-      const target = match[1].split("|")[0].trim();
+      const [rawTarget, ...rawLabel] = match[1].split("|");
+      const target = rawTarget.trim();
+      const label = rawLabel.join("|").trim() || target;
       const link = document.createElement("span");
       link.className = "wiki-link";
       link.contentEditable = "false";
-      link.dataset.wikilink = match[1];
-      link.textContent = match[1].split("|")[1]?.trim() || target;
+      const bibleReference = target.match(/^bible:(.+)$/i)?.[1]?.trim();
+      if (bibleReference) {
+        link.classList.add("bible-link");
+        link.dataset.bibleref = bibleReference;
+        link.textContent = label;
+        link.title = `Look up ${bibleReference}`;
+      } else {
+        link.dataset.wikilink = match[1];
+        link.textContent = label;
+        link.title = `Open note ${label}`;
+      }
       link.addEventListener("click", () => followWikilink(target));
       parent.append(link);
-    } else if (match[2] || match[3] || match[4]) {
-      const node = document.createElement(match[2] ? "strong" : match[3] ? "em" : "code");
-      node.textContent = match[2] || match[3] || match[4];
+    } else if (match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[9]) {
+      const tagName = match[2] ? "strong"
+        : match[3] ? "del"
+          : match[4] ? "em"
+            : match[5] ? "code"
+              : match[6] ? "u"
+                : match[7] ? "mark"
+                  : "span";
+      const node = document.createElement(tagName);
+      if (match[9]) {
+        node.style.color = match[8];
+        node.dataset.textColor = match[8].toLowerCase();
+      }
+      appendFormattedInline(node, match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[9]);
       parent.append(node);
     }
     cursor = match.index + match[0].length;
@@ -622,7 +861,7 @@ function renderEditableNote(markdown) {
     const imageTranscription = line.match(/^<!-- image-transcription:([A-Za-z0-9._-]+) -->$/);
     const heading = line.match(/^(#{1,3})\s+(.+)$/);
     const quote = line.match(/^>\s?(.*)$/);
-    const listMatch = line.match(/^\s*[-*]\s+(.+)$/);
+    const listMatch = line.match(/^\s*(?:([-*])|(\d+)\.)\s+(.+)$/);
     if (imageTranscription) {
       flushParagraph();
       currentList = null;
@@ -651,13 +890,14 @@ function renderEditableNote(markdown) {
       elements.editor.append(blockquote);
     } else if (listMatch) {
       flushParagraph();
-      if (!currentList || listKind !== "ul") {
-        currentList = document.createElement("ul");
-        listKind = "ul";
+      const nextListKind = listMatch[2] ? "ol" : "ul";
+      if (!currentList || listKind !== nextListKind) {
+        currentList = document.createElement(nextListKind);
+        listKind = nextListKind;
         elements.editor.append(currentList);
       }
       const item = document.createElement("li");
-      appendFormattedInline(item, listMatch[1]);
+      appendFormattedInline(item, listMatch[3]);
       currentList.append(item);
     } else {
       currentList = null;
@@ -671,10 +911,17 @@ function serializeInline(node) {
   if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   if (node.tagName === "BR") return "\n";
+  if (node.dataset.bibleref) return `[[bible:${node.dataset.bibleref}|${node.textContent || ""}]]`;
   if (node.dataset.wikilink) return `[[${node.dataset.wikilink}]]`;
   const content = [...node.childNodes].map(serializeInline).join("");
   if (node.tagName === "STRONG" || node.tagName === "B") return `**${content}**`;
   if (node.tagName === "EM" || node.tagName === "I") return `*${content}*`;
+  if (node.tagName === "U") return `<u>${content}</u>`;
+  if (node.tagName === "MARK") return `<mark>${content}</mark>`;
+  if (node.tagName === "DEL" || node.tagName === "S" || node.tagName === "STRIKE") return `~~${content}~~`;
+  if (node.tagName === "SPAN" && /^#[0-9a-f]{6}$/i.test(node.dataset.textColor || "")) {
+    return `<span style="color: ${node.dataset.textColor.toLowerCase()};">${content}</span>`;
+  }
   if (node.tagName === "CODE") return `\`${content}\``;
   return content;
 }
@@ -872,10 +1119,26 @@ elements.sourceToggle.addEventListener("click", () => {
 });
 
 function followWikilink(label) {
+  const bibleReference = label.match(/^bible:(.+)$/i)?.[1];
+  if (bibleReference) {
+    const reference = findBibleReference(bibleReference);
+    if (!reference) {
+      showToast(`Invalid Bible cross-reference: ${bibleReference}.`, true);
+      return;
+    }
+    elements.esvQuery.value = reference;
+    setPassagePanelVisible(true);
+    lookupEsvReference(reference);
+    return;
+  }
   const normalized = label.toLocaleLowerCase();
   const note = state.folders.flatMap((folder) => folder.files || []).find((item) => {
-    return item.name.toLocaleLowerCase() === normalized
-      || item.filename.replace(/\.md$/i, "").toLocaleLowerCase() === normalized;
+    const targets = [
+      item.path,
+      item.name,
+      typeof item.filename === "string" ? item.filename.replace(/\.md$/i, "") : "",
+    ];
+    return targets.some((target) => target?.toLocaleLowerCase() === normalized);
   });
   if (!note) {
     showToast(`No note found for [[${label}]].`, true);
@@ -1157,6 +1420,80 @@ elements.saveButton.addEventListener("click", saveNote);
 elements.deleteButton.addEventListener("click", deleteNote);
 elements.refreshButton.addEventListener("click", refreshLibrary);
 elements.todayRefreshButton.addEventListener("click", loadReadingPlan);
+elements.formattingToolbar.addEventListener("mousedown", (event) => {
+  rememberEditorSelection();
+  if (event.target instanceof Element && event.target.closest("button")) event.preventDefault();
+});
+elements.formattingToolbar.addEventListener("click", (event) => {
+  const button = event.target instanceof Element
+    ? event.target.closest("[data-editor-command], [data-editor-wrap]")
+    : null;
+  if (!button) return;
+  if (button.dataset.editorCommand) {
+    if (button.dataset.editorCommand === "insertUnorderedList") {
+      applyEditorList("ul");
+      return;
+    }
+    if (button.dataset.editorCommand === "insertOrderedList") {
+      applyEditorList("ol");
+      return;
+    }
+    const selection = restoreEditorSelection();
+    if (!selection) {
+      showToast("Click in the note where you want to format text.", true);
+      return;
+    }
+    document.execCommand(button.dataset.editorCommand, false, null);
+    rememberEditorSelection();
+  } else if (button.dataset.editorWrap === "underline") {
+    wrapEditorSelection("u");
+  } else if (button.dataset.editorWrap === "highlight") {
+    wrapEditorSelection("mark");
+  }
+});
+elements.headingFormat.addEventListener("change", () => {
+  const selection = restoreEditorSelection();
+  if (!selection) {
+    showToast("Click in the note where you want to format text.", true);
+    elements.headingFormat.value = "P";
+    return;
+  }
+  const range = selection.getRangeAt(0);
+  const block = editorBlockAtBoundary(range.startContainer, range.startOffset, false)
+    || editorBlockAtBoundary(range.endContainer, range.endOffset, true);
+  if (block?.closest("blockquote")) {
+    showToast("Formatting inside quotations is not supported.", true);
+    elements.headingFormat.value = "P";
+    return;
+  }
+  document.execCommand("formatBlock", false, elements.headingFormat.value);
+  elements.headingFormat.value = "P";
+  rememberEditorSelection();
+});
+elements.textColor.addEventListener("pointerdown", rememberEditorSelection);
+elements.textColor.addEventListener("change", () => {
+  wrapEditorSelection("span", elements.textColor.value);
+});
+elements.insertNoteReference.addEventListener("click", () => {
+  const path = elements.noteReferenceTarget.value;
+  const note = state.folders
+    .flatMap((folder) => folder.files || [])
+    .find((item) => item.path === path);
+  if (!note) {
+    showToast("Choose a note to cross-reference.", true);
+    return;
+  }
+  insertEditorReference(path, note.name.replace(/\.md$/i, ""));
+});
+elements.insertBibleReference.addEventListener("click", () => {
+  const reference = findBibleReference(elements.bibleReferenceInput.value.trim());
+  if (!reference) {
+    showToast("Enter a Bible passage reference, such as John 3:16.", true);
+    return;
+  }
+  insertEditorReference(`bible:${reference}`, reference, true);
+  elements.bibleReferenceInput.value = "";
+});
 elements.navLinks.forEach((link) => {
   link.addEventListener("click", (event) => {
     event.preventDefault();
@@ -1216,6 +1553,7 @@ async function showSession(session) {
 
 function clearSignedOutState() {
   state.userId = null;
+  state.editorSelection = null;
   state.folders = [];
   state.activeFolder = null;
   state.activeNotePath = null;
@@ -1237,6 +1575,7 @@ function clearSignedOutState() {
   elements.editor.contentEditable = "false";
   elements.editor.setAttribute("aria-disabled", "true");
   elements.editor.innerHTML = '<p class="empty-state">Select a note to read or edit…</p>';
+  elements.formattingToolbar.hidden = true;
   elements.noteSource.value = "";
   elements.notePhotos.replaceChildren();
   elements.passageToggle.hidden = true;

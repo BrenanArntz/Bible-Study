@@ -9,6 +9,24 @@ const FOLDER_NAMES = {
 };
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const IMAGE_LINK = /!\[([^\]]*)\]\(([^)]+)\)/g;
+const bibleBooks = [
+  "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges",
+  "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles",
+  "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs",
+  "Ecclesiastes", "Song of Solomon", "Song of Songs", "Isaiah", "Jeremiah",
+  "Lamentations",
+  "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah",
+  "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi", "Matthew",
+  "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians",
+  "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians",
+  "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews",
+  "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude",
+  "Revelation",
+].sort((left, right) => right.length - left.length);
+const bibleBookPattern = bibleBooks
+  .map((book) => book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join("|");
+const bibleReferencePattern = new RegExp(`\\b(${bibleBookPattern})(?![a-z])\\s+(\\d{1,3})`, "i");
 
 function fail(error, prefix = "Supabase request failed") {
   if (error?.context?.json) {
@@ -350,6 +368,33 @@ function makeTitle(identifier, title, reference, fallback) {
   return base || "Handwritten note";
 }
 
+function addVerseReferences(markdown, title, reference) {
+  const passage = [reference, title]
+    .map((value) => String(value || "").match(bibleReferencePattern))
+    .find(Boolean);
+  if (!passage) return markdown;
+
+  const book = passage[1];
+  let chapter = Number(passage[2]);
+  const chapterHeading = new RegExp(
+    `^\\s*(?:#{1,6}\\s*)?${book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(\\d{1,3})\\s*:?\\s*$`,
+    "i",
+  );
+  return markdown.split(/\r?\n/).map((line) => {
+    const heading = line.match(chapterHeading)
+      || line.match(/^\s*(?:#{1,6}\s*)?chapter\s+(\d{1,3})\s*:?\s*$/i);
+    if (heading) {
+      chapter = Number(heading[1]);
+      return line;
+    }
+
+    const verse = line.match(/^(\s*)(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?(\s+\S.*)$/);
+    if (!verse) return line;
+    const range = verse[3] ? `-${verse[3]}` : "";
+    return `${verse[1]}${book} ${chapter}:${verse[2]}${range}${verse[4]}`;
+  }).join("\n");
+}
+
 function slug(value) {
   return value.toLocaleLowerCase()
     .replace(/\s*-\s*/g, "-")
@@ -368,7 +413,8 @@ function createNewContent({ title, identifier, date, reference, markdown, filena
     ...(reference ? [`reference: ${JSON.stringify(reference)}`] : []),
     "---",
   ].join("\n");
-  const transcription = markdown.trim() || "No readable text was detected.";
+  const transcription = addVerseReferences(markdown.trim(), title, reference)
+    || "No readable text was detected.";
   return `${frontmatter}\n\n# ${title}\n\n## Image upload — ${new Date().toISOString()}\n\n<!-- image-transcription:${filename} -->\n\n${transcription}\n\n![Uploaded handwritten page](${relativeImagePath(path, filename)})\n`;
 }
 
