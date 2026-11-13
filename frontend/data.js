@@ -881,6 +881,7 @@ async function importNotes(fileList) {
 }
 
 export async function apiRequest(url, options = {}) {
+  await currentUser();
   const parsed = new URL(url, window.location.origin);
   const method = (options.method || "GET").toUpperCase();
   const path = parsed.pathname;

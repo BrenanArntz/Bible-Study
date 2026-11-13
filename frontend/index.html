@@ -27,7 +27,7 @@
     </header>
 
     <main class="auth-panel" id="auth-panel">
-      <form class="auth-card" id="auth-form" method="post" onsubmit="event.preventDefault()">
+      <form class="auth-card" id="auth-form" method="post" onsubmit="event.preventDefault();document.querySelector('#auth-message').textContent='Secure sign-in is unavailable. Reload the page and try again.'">
         <p class="eyebrow">YOUR PRIVATE STUDY SPACE</p>
         <h1>Sign in to Scripture Study</h1>
         <p class="subheading">Sign in with an email and password for an account created in Supabase. Your notes are private to your account.</p>
@@ -35,7 +35,7 @@
         <input id="auth-email" name="email" type="email" autocomplete="username" required>
         <label for="auth-password">Password</label>
         <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
-        <button class="button button-primary" type="submit">Sign in</button>
+        <button class="button button-primary" id="auth-submit-button" type="submit">Sign in</button>
         <p class="auth-message" id="auth-message" role="status" aria-live="polite"></p>
       </form>
     </main>

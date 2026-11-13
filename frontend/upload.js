@@ -116,10 +116,11 @@ form.addEventListener("submit", async (event) => {
 
 const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
 if (sessionError) {
-  setStatus(`Could not check your sign-in: ${sessionError.message}`, true);
+  window.location.replace("./index.html");
 } else if (!sessionData.session) {
   window.location.replace("./index.html");
 } else {
+  document.querySelector(".upload-shell").hidden = false;
   loadExistingNotes().catch((error) => setStatus(error.message, true));
 }
 
