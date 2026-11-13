@@ -609,6 +609,65 @@ function searchNotes(params) {
   });
 }
 
+const TASK_TYPES = ["personal-reading", "reading-with-haley", "verse-quiz", "greek", "church-history", "other"];
+
+async function taskPlan(date = new Date().toISOString().slice(0, 10)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Use a valid task date.");
+  const user = await currentUser();
+  const [{ data: tasks, error: taskError }, { data: completed, error: completionError }] = await Promise.all([
+    supabase.from("study_tasks").select("id,task_type,title,details,weekdays").order("created_at"),
+    supabase.from("study_task_completions").select("task_id").eq("completion_date", date),
+  ]);
+  if (taskError) return fail(taskError, "Could not load recurring tasks");
+  if (completionError) return fail(completionError, "Could not load task completions");
+  const done = new Set((completed || []).map((item) => item.task_id));
+  const weekday = new Date(`${date}T12:00:00`).getDay();
+  return {
+    tasks: tasks || [],
+    items: (tasks || []).filter((task) => task.weekdays.includes(weekday)).map((task) => ({ ...task, completed: done.has(task.id) })),
+    date,
+    user_id: user.id,
+  };
+}
+
+async function saveTask(payload, id = "") {
+  const user = await currentUser();
+  const weekdays = [...new Set((Array.isArray(payload.weekdays) ? payload.weekdays : []).map(Number))].sort();
+  const title = String(payload.title || "").trim();
+  if (!TASK_TYPES.includes(payload.task_type) || !title || title.length > 120 || !weekdays.length || weekdays.some((day) => day < 0 || day > 6)) {
+    throw new Error("Choose a task type, name, and at least one repeat day.");
+  }
+  const values = { user_id: user.id, task_type: payload.task_type, title, details: String(payload.details || "").trim().slice(0, 300), weekdays };
+  const query = id
+    ? supabase.from("study_tasks").update(values).eq("id", id).select("id").maybeSingle()
+    : supabase.from("study_tasks").insert(values).select("id").single();
+  const { data, error } = await query;
+  if (error) return fail(error, "Could not save recurring task");
+  if (!data) throw new Error("Task not found or you do not have permission to edit it.");
+  return { id: data.id, status: id ? "updated" : "created" };
+}
+
+async function toggleTask(taskId, date) {
+  if (!/^[0-9a-f-]{36}$/i.test(taskId) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Invalid task completion.");
+  const user = await currentUser();
+  const { data: existing, error: findError } = await supabase.from("study_task_completions").select("task_id").eq("task_id", taskId).eq("completion_date", date).maybeSingle();
+  if (findError) return fail(findError, "Could not check task completion");
+  const query = existing
+    ? supabase.from("study_task_completions").delete().eq("task_id", taskId).eq("completion_date", date)
+    : supabase.from("study_task_completions").insert({ task_id: taskId, user_id: user.id, completion_date: date });
+  const { error } = await query;
+  if (error) return fail(error, "Could not update task completion");
+  return { completed: !existing };
+}
+
+async function deleteTask(id) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid recurring task.");
+  const { data, error } = await supabase.from("study_tasks").delete().eq("id", id).select("id");
+  if (error) return fail(error, "Could not delete recurring task");
+  if (!data?.length) throw new Error("Task not found or you do not have permission to delete it.");
+  return { status: "deleted" };
+}
+
 function readingPlan() {
   return allNotes().then((notes) => ({
     items: notes
@@ -828,6 +887,13 @@ export async function apiRequest(url, options = {}) {
   if (path === "/api/folders" && method === "GET") return listFolders();
   if (path === "/api/search/notes" && method === "GET") return searchNotes(parsed.searchParams);
   if (path === "/api/reading-plan" && method === "GET") return readingPlan();
+  if (path === "/api/tasks" && method === "GET") return taskPlan(parsed.searchParams.get("date") || undefined);
+  if (path === "/api/tasks" && method === "POST") return saveTask(JSON.parse(options.body));
+  const taskToggle = path.match(/^\/api\/tasks\/([0-9a-f-]+)\/toggle$/i);
+  if (taskToggle && method === "POST") return toggleTask(taskToggle[1], parsed.searchParams.get("date") || "");
+  const task = path.match(/^\/api\/tasks\/([0-9a-f-]+)$/i);
+  if (task && method === "PUT") return saveTask(JSON.parse(options.body), task[1]);
+  if (task && method === "DELETE") return deleteTask(task[1]);
   if (path === "/api/uploads" && method === "POST") return uploadBatch(options.body);
   if (path === "/api/esv" && method === "GET") return esvLookup(parsed.searchParams.get("q") || "");
   const toggle = path.match(/^\/api\/reading-plan\/([^/]+)\/toggle$/);

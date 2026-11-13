@@ -27,7 +27,7 @@
     </header>
 
     <main class="auth-panel" id="auth-panel">
-      <form class="auth-card" id="auth-form">
+      <form class="auth-card" id="auth-form" method="post" onsubmit="event.preventDefault()">
         <p class="eyebrow">YOUR PRIVATE STUDY SPACE</p>
         <h1>Sign in to Scripture Study</h1>
         <p class="subheading">Sign in with an email and password for an account created in Supabase. Your notes are private to your account.</p>
@@ -263,11 +263,35 @@
           <div class="page-heading">
             <div>
               <p class="eyebrow">YOUR DAILY RHYTHM</p>
-              <h1 id="today-title">Today's reading</h1>
+              <h1 id="today-title">Today</h1>
               <p class="subheading" id="today-date"></p>
             </div>
-            <button class="button button-quiet" id="today-refresh-button" type="button">Refresh plan</button>
+            <div class="today-actions">
+              <button class="button button-quiet" id="today-task-settings-button" type="button" aria-expanded="false" aria-controls="today-task-settings">Task settings</button>
+              <button class="button button-quiet" id="today-refresh-button" type="button">Refresh plan</button>
+            </div>
           </div>
+
+          <section id="today-task-settings" class="today-task-settings panel-card" hidden>
+            <div class="panel-heading"><div><p class="eyebrow">RECURRING ROUTINE</p><h2>Task settings</h2></div></div>
+            <form id="today-task-form" class="task-settings-form">
+              <input id="task-edit-id" type="hidden">
+              <label>Task type<select id="task-type"><option value="personal-reading">Personal Reading</option><option value="reading-with-haley">Reading with Haley</option><option value="verse-quiz">Verse Quiz</option><option value="greek">Reviewing Greek</option><option value="church-history">Church History Study</option><option value="other">Other</option></select></label>
+              <label>Task name<input id="task-title" maxlength="120" required placeholder="e.g. John 3:1–21"></label>
+              <label class="task-details-field">Details or verses<input id="task-details" maxlength="300" placeholder="Passage, verses, or study focus"></label>
+              <fieldset class="task-days"><legend>Repeat on</legend>
+                <label><input type="checkbox" name="task-day" value="0">Sun</label><label><input type="checkbox" name="task-day" value="1">Mon</label><label><input type="checkbox" name="task-day" value="2">Tue</label><label><input type="checkbox" name="task-day" value="3">Wed</label><label><input type="checkbox" name="task-day" value="4">Thu</label><label><input type="checkbox" name="task-day" value="5">Fri</label><label><input type="checkbox" name="task-day" value="6">Sat</label>
+              </fieldset>
+              <div class="task-form-actions"><button class="button button-primary" type="submit" id="task-save-button">Add recurring task</button><button class="button button-quiet" type="button" id="task-cancel-edit" hidden>Cancel edit</button></div>
+            </form>
+            <ul id="task-settings-list" class="task-settings-list"></ul>
+          </section>
+
+          <section class="today-plan-card panel-card today-tasks-card" aria-labelledby="today-tasks-title">
+            <div class="panel-heading"><div><p class="eyebrow">RECURRING ROUTINE</p><h2 id="today-tasks-title">Today's tasks</h2></div></div>
+            <p class="empty-state" id="today-tasks-empty" hidden></p>
+            <ul class="reading-list today-reading-list" id="today-task-list" aria-live="polite"></ul>
+          </section>
 
           <section class="today-plan-card panel-card" aria-labelledby="today-plan-title">
             <div class="panel-heading">

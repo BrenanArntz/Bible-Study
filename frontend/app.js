@@ -81,7 +81,36 @@ const elements = {
   signoutButton: document.querySelector("#signout-button"),
   importNotesButton: document.querySelector("#import-notes-button"),
   importNotesInput: document.querySelector("#import-notes-input"),
+  taskSettingsButton: document.querySelector("#today-task-settings-button"),
+  taskSettings: document.querySelector("#today-task-settings"),
+  taskForm: document.querySelector("#today-task-form"),
+  taskEditId: document.querySelector("#task-edit-id"),
+  taskType: document.querySelector("#task-type"),
+  taskTitle: document.querySelector("#task-title"),
+  taskDetails: document.querySelector("#task-details"),
+  taskSaveButton: document.querySelector("#task-save-button"),
+  taskCancelEdit: document.querySelector("#task-cancel-edit"),
+  taskSettingsList: document.querySelector("#task-settings-list"),
+  todayTaskList: document.querySelector("#today-task-list"),
+  todayTasksEmpty: document.querySelector("#today-tasks-empty"),
 };
+
+elements.authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = elements.authEmail.value.trim();
+  const password = elements.authPassword.value;
+  elements.authMessage.textContent = "Signing in…";
+  try {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    elements.authForm.reset();
+    elements.authMessage.textContent = "Signed in.";
+  } catch (error) {
+    elements.authMessage.textContent = error.message;
+  }
+});
+
+
 
 const folderSymbols = {
   exegesis: "⌕",
@@ -1254,6 +1283,130 @@ async function loadReadingPlan() {
     elements.progressPercent.textContent = "—";
     elements.progressBar.style.width = "0";
   }
+  try {
+    await loadRecurringTasks();
+  } catch (error) {
+    elements.todayTaskList.replaceChildren();
+    elements.todayTasksEmpty.hidden = false;
+    elements.todayTasksEmpty.textContent = `Could not load recurring tasks: ${error.message}`;
+  }
+}
+
+const taskTypeLabels = {
+  "personal-reading": "Personal Reading", "reading-with-haley": "Reading with Haley",
+  "verse-quiz": "Verse Quiz", greek: "Reviewing Greek",
+  "church-history": "Church History Study", other: "Other",
+};
+
+async function loadRecurringTasks() {
+  const payload = await requestJson(`/api/tasks?date=${localDateKey()}`);
+  renderTodayTasks(payload.items || []);
+  renderTaskSettings(payload.tasks || []);
+}
+
+function renderTodayTasks(items) {
+  elements.todayTaskList.replaceChildren();
+  elements.todayTasksEmpty.hidden = items.length > 0;
+  elements.todayTasksEmpty.textContent = "No recurring tasks scheduled for today. Use Task settings to set up a routine.";
+  items.forEach((task, index) => {
+    const row = document.createElement("li");
+    row.className = "reading-item";
+    row.classList.toggle("completed", task.completed);
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = task.completed;
+    checkbox.id = `task-${index}`;
+    checkbox.addEventListener("change", () => toggleTaskCompletion(task.id));
+    const label = document.createElement("label");
+    label.htmlFor = checkbox.id;
+    const kind = document.createElement("span");
+    kind.className = "reading-date";
+    kind.textContent = taskTypeLabels[task.task_type] || "Task";
+    const title = document.createElement("span");
+    title.className = "reading-reference";
+    title.textContent = task.title;
+    label.append(kind, title);
+    if (task.details) {
+      const details = document.createElement("span");
+      details.className = "task-details-text";
+      details.textContent = task.details;
+      label.append(details);
+    }
+    row.append(checkbox, label);
+    elements.todayTaskList.append(row);
+  });
+}
+
+function renderTaskSettings(tasks) {
+  elements.taskSettingsList.replaceChildren();
+  tasks.forEach((task) => {
+    const row = document.createElement("li");
+    const description = document.createElement("span");
+    const days = task.weekdays.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
+    description.textContent = `${taskTypeLabels[task.task_type] || "Task"}: ${task.title} · ${days}`;
+    row.append(description);
+    const edit = document.createElement("button");
+    edit.type = "button"; edit.className = "button button-quiet"; edit.textContent = "Edit";
+    edit.addEventListener("click", () => editRecurringTask(task));
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.className = "button button-danger"; remove.textContent = "Delete";
+    remove.addEventListener("click", () => deleteRecurringTask(task));
+    row.append(edit, remove);
+    elements.taskSettingsList.append(row);
+  });
+}
+
+function resetTaskForm() {
+  elements.taskForm.reset();
+  elements.taskEditId.value = "";
+  elements.taskSaveButton.textContent = "Add recurring task";
+  elements.taskCancelEdit.hidden = true;
+}
+
+function editRecurringTask(task) {
+  elements.taskEditId.value = task.id;
+  elements.taskType.value = task.task_type;
+  elements.taskTitle.value = task.title;
+  elements.taskDetails.value = task.details || "";
+  document.querySelectorAll('input[name="task-day"]').forEach((checkbox) => { checkbox.checked = task.weekdays.includes(Number(checkbox.value)); });
+  elements.taskSaveButton.textContent = "Save changes";
+  elements.taskCancelEdit.hidden = false;
+  elements.taskTitle.focus();
+}
+
+async function toggleTaskCompletion(id) {
+  try {
+    await requestJson(`/api/tasks/${id}/toggle?date=${localDateKey()}`, { method: "POST" });
+    await loadRecurringTasks();
+  } catch (error) { showToast(error.message, true); }
+}
+
+async function deleteRecurringTask(task) {
+  if (!window.confirm(`Delete recurring task “${task.title}”?`)) return;
+  try {
+    await requestJson(`/api/tasks/${task.id}`, { method: "DELETE" });
+    if (elements.taskEditId.value === task.id) resetTaskForm();
+    await loadRecurringTasks();
+  } catch (error) { showToast(error.message, true); }
+}
+
+async function saveRecurringTask(event) {
+  event.preventDefault();
+  const id = elements.taskEditId.value;
+  const payload = {
+    task_type: elements.taskType.value,
+    title: elements.taskTitle.value,
+    details: elements.taskDetails.value,
+    weekdays: [...document.querySelectorAll('input[name="task-day"]:checked')].map((checkbox) => Number(checkbox.value)),
+  };
+  try {
+    await requestJson(id ? `/api/tasks/${id}` : "/api/tasks", {
+      method: id ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    resetTaskForm();
+    await loadRecurringTasks();
+    showToast(id ? "Recurring task updated." : "Recurring task added.");
+  } catch (error) { showToast(error.message, true); }
 }
 
 function localDateKey(date = new Date()) {
@@ -1423,6 +1576,14 @@ elements.saveButton.addEventListener("click", saveNote);
 elements.deleteButton.addEventListener("click", deleteNote);
 elements.refreshButton.addEventListener("click", refreshLibrary);
 elements.todayRefreshButton.addEventListener("click", loadReadingPlan);
+elements.taskSettingsButton.addEventListener("click", () => {
+  const open = elements.taskSettings.hidden;
+  elements.taskSettings.hidden = !open;
+  elements.taskSettingsButton.setAttribute("aria-expanded", String(open));
+  if (open) loadRecurringTasks().catch((error) => showToast(error.message, true));
+});
+elements.taskForm.addEventListener("submit", saveRecurringTask);
+elements.taskCancelEdit.addEventListener("click", resetTaskForm);
 elements.formattingToolbar.addEventListener("mousedown", (event) => {
   rememberEditorSelection();
   if (event.target instanceof Element && event.target.closest("button")) event.preventDefault();
@@ -1598,21 +1759,6 @@ function clearSignedOutState() {
   elements.deleteButton.disabled = true;
   elements.deleteButton.hidden = true;
 }
-
-elements.authForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const email = elements.authEmail.value.trim();
-  const password = elements.authPassword.value;
-  elements.authMessage.textContent = "Signing in…";
-  try {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    elements.authForm.reset();
-    elements.authMessage.textContent = "Signed in.";
-  } catch (error) {
-    elements.authMessage.textContent = error.message;
-  }
-});
 
 elements.signoutButton.addEventListener("click", async () => {
   const { error } = await supabase.auth.signOut();
