@@ -27,7 +27,7 @@ const bibleBookPattern = bibleBooks
   .map((book) => book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
   .join("|");
 const bibleReferencePattern = new RegExp(`\\b(${bibleBookPattern})(?![a-z])\\s+(\\d{1,3})`, "i");
-const bookAliases = { Eph: "Ephesians", Rom: "Romans", Matt: "Matthew", Phil: "Philippians", Col: "Colossians", Gal: "Galatians", Acts: "Acts", Ps: "Psalms", Jn: "John", 1Cor: "1 Corinthians", 2Cor: "2 Corinthians" };
+const bookAliases = { Eph: "Ephesians", Rom: "Romans", Matt: "Matthew", Phil: "Philippians", Col: "Colossians", Gal: "Galatians", Acts: "Acts", Ps: "Psalms", Jn: "John", "1Cor": "1 Corinthians", "2Cor": "2 Corinthians" };
 const allBibleNames = [...bibleBooks, ...Object.keys(bookAliases)];
 const allBiblePattern = allBibleNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
 
@@ -174,9 +174,19 @@ async function noteByPath(path) {
   return data;
 }
 
+function enrichBibleReferences(content) {
+  const { metadata, body } = parseFrontmatter(content);
+  const heading = body.match(/^#\s+(.+?)\s*$/m)?.[1] || "";
+  const title = typeof metadata.title === "string" ? metadata.title.trim() || heading : heading;
+  const reference = typeof metadata.reference === "string" ? metadata.reference.trim() : "";
+  const enriched = addVerseReferences(body, title, reference);
+  return enriched === body ? content : `${content.slice(0, content.length - body.length)}${enriched}`;
+}
+
 async function saveNote(path, content) {
   const user = await currentUser();
-  const fields = noteFields(path, content);
+  const enrichedContent = enrichBibleReferences(content);
+  const fields = noteFields(path, enrichedContent);
   const { data, error } = await supabase
     .from("study_notes")
     .update({ ...fields, user_id: user.id })
@@ -185,7 +195,7 @@ async function saveNote(path, content) {
     .maybeSingle();
   if (error) return fail(error, "Could not save note");
   if (!data) throw new Error("Note not found or you do not have permission to edit it.");
-  return { path: data.path, status: "saved" };
+  return { path: data.path, status: "saved", content: enrichedContent };
 }
 
 async function insertNote(path, content) {
@@ -384,6 +394,7 @@ function addVerseReferences(markdown, title, reference) {
     `^\\s*(?:#{1,6}\\s*)?${book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(\\d{1,3})\\s*:?\\s*$`,
     "i",
   );
+  const bibleLink = (value) => `[[bible:${value}|${value}]]`;
   return markdown.split(/\r?\n/).map((line) => {
     const heading = line.match(chapterHeading)
       || line.match(/^\s*(?:#{1,6}\s*)?chapter\s+(\d{1,3})\s*:?\s*$/i);
@@ -393,13 +404,22 @@ function addVerseReferences(markdown, title, reference) {
     }
 
     const normalizedLine = line.replace(/^(\s*\d{1,3})[.)](?=\s)/, "$1");
+    const chapterVerse = normalizedLine.match(/^(\s*)(\d{1,3})\s*:\s*(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?(\s+\S.*)$/);
+    if (chapterVerse) {
+      chapter = Number(chapterVerse[2]);
+      previousVerse = Number(chapterVerse[3]);
+      const range = chapterVerse[4] ? `-${chapterVerse[4]}` : "";
+      const value = `${book} ${chapter}:${chapterVerse[3]}${range}`;
+      return `${chapterVerse[1]}${bibleLink(value)}${chapterVerse[5]}`;
+    }
     const verse = normalizedLine.match(/^(\s*)(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?(\s+\S.*)$/);
     if (!verse) return line;
     const verseNumber = Number(verse[2]);
     if (verseNumber < previousVerse && passage[3] && chapter < Number(passage[2]) + Number(passage[3])) chapter += 1;
     previousVerse = verseNumber;
     const range = verse[3] ? `-${verse[3]}` : "";
-    return `${verse[1]}${book} ${chapter}:${verse[2]}${range}${verse[4]}`;
+    const value = `${book} ${chapter}:${verse[2]}${range}`;
+    return `${verse[1]}${bibleLink(value)}${verse[4]}`;
   }).join("\n");
 }
 

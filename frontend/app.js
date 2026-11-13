@@ -1197,15 +1197,16 @@ async function saveNote() {
   elements.saveButton.disabled = true;
   try {
     const content = buildSavedNote(title);
-    await requestJson(`/api/note/${encodePath(state.activeNotePath)}`, {
+    const result = await requestJson(`/api/note/${encodePath(state.activeNotePath)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content }),
     });
-    state.noteRawContent = content;
+    state.noteRawContent = result.content || content;
     state.noteTitle = title;
     elements.noteTitle.value = title;
-    elements.noteSource.value = content;
+    elements.noteSource.value = state.noteRawContent;
+    renderEditableNote(getEditableMarkdown(state.noteRawContent));
     showToast("Note saved to your vault.");
     await loadVault();
   } catch (error) {
