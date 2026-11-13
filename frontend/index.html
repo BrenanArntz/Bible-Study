@@ -284,6 +284,7 @@
               <p class="subheading" id="today-date"></p>
             </div>
             <div class="today-actions">
+              <label class="schedule-date-control">Schedule date<input id="schedule-date" type="date" aria-label="Choose the schedule date for tasks and readings"></label>
               <button class="button button-quiet" id="today-task-settings-button" type="button" aria-expanded="false" aria-controls="today-task-settings">Task settings</button>
               <button class="button button-quiet" id="book-plan-settings-button" type="button" aria-expanded="false" aria-controls="book-plan-settings">Book plan settings</button>
               <button class="button button-quiet" id="today-refresh-button" type="button">Refresh plan</button>
@@ -337,9 +338,8 @@
           <section class="today-plan-card panel-card book-plans-card" aria-labelledby="book-reading-title">
             <div class="panel-heading">
               <div><p class="eyebrow">SCHEDULED READINGS</p><h2 id="book-reading-title">Book reading plan</h2></div>
-              <div class="book-plan-controls"><label>Schedule date<input id="book-plan-date" type="date" aria-label="Show readings scheduled for"></label></div>
             </div>
-            <p class="muted book-plan-date-hint">Choose a date to view or check off readings, including future dates if you read ahead.</p>
+            <p class="muted book-plan-date-hint">Choose a date above to view or check off readings, including future dates if you read ahead.</p>
             <div class="reading-progress">
               <div class="progress-label">
                 <span id="book-plan-progress-label">Loading scheduled readings…</span>

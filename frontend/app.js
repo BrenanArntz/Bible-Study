@@ -59,6 +59,7 @@ const elements = {
   refreshButton: document.querySelector("#refresh-button"),
   todayRefreshButton: document.querySelector("#today-refresh-button"),
   todayDate: document.querySelector("#today-date"),
+  scheduleDate: document.querySelector("#schedule-date"),
   bookPlanTodayEmpty: document.querySelector("#book-plan-today-empty"),
   bookPlanUpcoming: document.querySelector("#book-plan-upcoming"),
   bookPlanTodayList: document.querySelector("#book-plan-today-list"),
@@ -1525,8 +1526,19 @@ function formatDate(value) {
     : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
+function getSelectedScheduleDate() {
+  return (elements.scheduleDate?.value || elements.bookPlanDate?.value || localDateKey()).trim();
+}
+
+function setSelectedScheduleDate(date) {
+  const value = date || localDateKey();
+  if (elements.scheduleDate) elements.scheduleDate.value = value;
+  if (elements.bookPlanDate) elements.bookPlanDate.value = value;
+}
+
 async function loadReadingPlan() {
-  const date = new Date(`${localDateKey()}T12:00:00`);
+  const dateValue = getSelectedScheduleDate();
+  const date = new Date(`${dateValue}T12:00:00`);
   elements.todayDate.textContent = new Intl.DateTimeFormat(undefined, {
     weekday: "long",
     month: "long",
@@ -1534,20 +1546,19 @@ async function loadReadingPlan() {
     year: "numeric",
   }).format(date);
   try {
-    await loadRecurringTasks();
+    await loadRecurringTasks(dateValue);
   } catch (error) {
     elements.todayTaskList.replaceChildren();
     elements.todayTasksEmpty.hidden = false;
     elements.todayTasksEmpty.textContent = `Could not load recurring tasks: ${error.message}`;
   }
-  await loadBookReadingPlans();
+  await loadBookReadingPlans(dateValue);
 }
 
-async function loadBookReadingPlans() {
-  const date = elements.bookPlanDate.value || localDateKey();
+async function loadBookReadingPlans(dateValue = getSelectedScheduleDate()) {
   try {
-    const payload = await requestJson(`/api/book-reading-plans?date=${date}`);
-    renderBookReadingPlans(payload.items || [], payload.date || date);
+    const payload = await requestJson(`/api/book-reading-plans?date=${dateValue}`);
+    renderBookReadingPlans(payload.items || [], payload.date || dateValue);
   } catch (error) {
     elements.bookPlanList.replaceChildren();
     elements.bookPlansEmpty.hidden = false;
@@ -1568,8 +1579,8 @@ const taskTypeLabels = {
   "church-history": "Church History Study", other: "Other",
 };
 
-async function loadRecurringTasks() {
-  const payload = await requestJson(`/api/tasks?date=${localDateKey()}`);
+async function loadRecurringTasks(dateValue = getSelectedScheduleDate()) {
+  const payload = await requestJson(`/api/tasks?date=${dateValue}`);
   renderTodayTasks(payload.items || []);
   renderTaskSettings(payload.tasks || []);
 }
@@ -1646,7 +1657,7 @@ function editRecurringTask(task) {
 
 async function toggleTaskCompletion(id) {
   try {
-    await requestJson(`/api/tasks/${id}/toggle?date=${localDateKey()}`, { method: "POST" });
+    await requestJson(`/api/tasks/${id}/toggle?date=${getSelectedScheduleDate()}`, { method: "POST" });
     await loadRecurringTasks();
   } catch (error) { showToast(error.message, true); }
 }
@@ -1983,9 +1994,20 @@ elements.saveButton.addEventListener("click", saveNote);
 elements.deleteButton.addEventListener("click", deleteNote);
 elements.refreshButton.addEventListener("click", refreshLibrary);
 elements.todayRefreshButton.addEventListener("click", loadReadingPlan);
-elements.bookPlanDate.value = localDateKey();
+setSelectedScheduleDate(localDateKey());
 elements.bookPlanStartDate.value = localDateKey();
-elements.bookPlanDate.addEventListener("change", loadBookReadingPlans);
+if (elements.scheduleDate) {
+  elements.scheduleDate.addEventListener("change", () => {
+    setSelectedScheduleDate(elements.scheduleDate.value);
+    loadReadingPlan();
+  });
+}
+if (elements.bookPlanDate) {
+  elements.bookPlanDate.addEventListener("change", () => {
+    setSelectedScheduleDate(elements.bookPlanDate.value);
+    loadReadingPlan();
+  });
+}
 elements.bookPlanMode.addEventListener("change", updateBookPlanMode);
 updateBookPlanMode();
 elements.bookPlanSettingsButton.addEventListener("click", () => {
@@ -2089,12 +2111,17 @@ elements.navLinks.forEach((link) => {
   });
 });
 window.addEventListener("popstate", () => {
-  setActiveView(window.location.hash === "#today" ? "today" : "library");
+  const targetView = !window.location.hash || window.location.hash === "#today" ? "today" : "library";
+  setActiveView(targetView);
 });
 elements.esvForm.addEventListener("submit", lookupEsv);
 elements.noteSearchForm.addEventListener("submit", searchNotes);
 
-setActiveView(window.location.hash === "#today" ? "today" : "library");
+const initialView = !window.location.hash || window.location.hash === "#today" ? "today" : "library";
+if (!window.location.hash) {
+  window.history.replaceState(null, "", "#today");
+}
+setActiveView(initialView);
 
 async function showSession(session) {
   const authenticated = Boolean(session?.user);
