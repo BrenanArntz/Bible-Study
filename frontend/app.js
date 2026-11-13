@@ -67,6 +67,7 @@ const elements = {
   authPanel: document.querySelector("#auth-panel"),
   authForm: document.querySelector("#auth-form"),
   authEmail: document.querySelector("#auth-email"),
+  authPassword: document.querySelector("#auth-password"),
   authMessage: document.querySelector("#auth-message"),
   signedInEmail: document.querySelector("#signed-in-email"),
   signoutButton: document.querySelector("#signout-button"),
@@ -1259,17 +1260,13 @@ function clearSignedOutState() {
 elements.authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const email = elements.authEmail.value.trim();
-  elements.authMessage.textContent = "Sending sign-in link…";
+  const password = elements.authPassword.value;
+  elements.authMessage.textContent = "Signing in…";
   try {
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: false,
-        emailRedirectTo: `${window.location.origin}${window.location.pathname}`,
-      },
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    elements.authMessage.textContent = "If this email has been invited, a sign-in link is on its way.";
+    elements.authForm.reset();
+    elements.authMessage.textContent = "Signed in.";
   } catch (error) {
     elements.authMessage.textContent = error.message;
   }

@@ -5,7 +5,7 @@ A JavaScript study-notes app hosted on GitHub Pages. Supabase provides sign-in, 
 ## Supabase setup
 
 1. In the Supabase SQL Editor for your project, run [`supabase/migrations/20261113000000_create_study_notes.sql`](supabase/migrations/20261113000000_create_study_notes.sql). It creates the notes table, owner-only row-level security policies, and a private image bucket with per-user policies.
-2. In Authentication settings, disable public sign-ups. The connected project currently has public sign-up enabled, so change this before launch. Invite each permitted user from the Supabase dashboard. The app sends magic links only to existing accounts.
+2. In Authentication settings, disable public sign-ups. Create each permitted user with an email and password in the Supabase dashboard. The app signs in existing accounts only; it does not provide public registration.
 3. Configure the Supabase Auth site URL and redirect allowlist to include your GitHub Pages URL, for example `https://<github-user>.github.io/<repository>/`.
 4. Deploy the Edge Functions from the repository root with the Supabase CLI:
 
@@ -22,13 +22,11 @@ The Supabase URL and publishable/anon key in `frontend/supabase-config.js` are p
 
 ## GitHub Pages
 
-Push this repository to GitHub with a `main` branch, then enable **Settings → Pages → GitHub Actions**. The workflow at `.github/workflows/pages.yml` publishes only `frontend/`; notes, Python environments, and local configuration are not deployed.
-
-This workspace does not currently have a Git repository initialized. Initialize it only after confirming the files to publish. The `notes/` directory is ignored so your private study material is not committed accidentally.
+The workflow at `.github/workflows/pages.yml` publishes only `frontend/` and enables Pages for GitHub Actions on its first run. If deployment fails, verify **Settings → Pages → Build and deployment → Source** is set to **GitHub Actions**. Notes, Python environments, and local configuration are not deployed.
 
 ## First use and importing notes
 
-1. Open the deployed Pages URL and sign in with an invited account.
+1. Open the deployed Pages URL and sign in with an account and password created in Supabase.
 2. Choose **Import local notes** and select the local `notes/` folder. This copies Markdown notes and image attachments into the signed-in Supabase account. Existing notes with the same path are skipped. The importer does not delete or modify the local originals.
 3. The app keeps each account's notes separate with database and Storage row-level security policies.
 
