@@ -1,0 +1,5 @@
+[functions.transcribe-image]
+verify_jwt = true
+
+[functions.esv-lookup]
+verify_jwt = true

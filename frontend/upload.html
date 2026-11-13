@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111827">
+    <title>Add handwritten notes — Scripture Study</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script type="module" src="./upload.js"></script>
+  </head>
+  <body class="upload-page">
+    <header class="topbar">
+      <a class="brand" href="./index.html" aria-label="Scripture Study home">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span>Scripture <span class="brand-muted">Study</span></span>
+      </a>
+      <div class="vault-status"><span class="status-dot"></span> Supabase</div>
+    </header>
+
+    <main class="upload-shell">
+      <a class="upload-back" href="./index.html">← Back to library</a>
+      <section class="upload-card" aria-labelledby="upload-title">
+        <p class="eyebrow">ADD TO YOUR STUDY</p>
+        <h1 id="upload-title">Upload handwritten notes</h1>
+        <p class="upload-intro">Take a photo of a page or choose an image from your phone. The original image is saved with its Markdown note.</p>
+        <p class="upload-limit">Select pages in reading order. Auto-categorization uses the transcription; an E-number such as E001 creates an exegesis note, and following continuation pages in this batch join that note. You can also append pages to an existing note.</p>
+        <p class="upload-limit">Images are stored privately in Supabase. Gemini transcription runs through a Supabase Edge Function; browser OCR is used if Gemini is not configured.</p>
+
+        <form class="upload-form" id="upload-form">
+          <label class="upload-field" for="upload-destination">
+            Destination
+            <select id="upload-destination" name="destination">
+              <option value="auto">Auto-categorize from handwriting</option>
+              <option value="existing">Add to an existing note</option>
+            </select>
+          </label>
+
+          <label class="upload-field" id="existing-note-field" for="existing-note" hidden>
+            Existing note
+            <select id="existing-note">
+              <option value="">Loading notes…</option>
+            </select>
+          </label>
+
+          <div class="upload-field">
+            <span>Choose photos</span>
+            <div class="upload-source-actions" role="group" aria-label="Choose how to add photos">
+              <label class="button button-primary upload-source-button">
+                Take a photo
+                <input class="upload-source-input" id="camera-photo" type="file" accept="image/*" capture="environment" aria-label="Take a photo">
+              </label>
+              <label class="button upload-source-secondary upload-source-button">
+                Choose from camera roll
+                <input class="upload-source-input" id="gallery-photos" type="file" accept="image/*" multiple aria-label="Choose from camera roll">
+              </label>
+            </div>
+            <span class="upload-limit">You can add more pages from either source before uploading.</span>
+          </div>
+
+          <div class="upload-previews" id="photo-previews" aria-live="polite"></div>
+          <p class="upload-limit">Image files up to 25 MB.</p>
+          <button class="button button-primary upload-submit" id="upload-button" type="submit">Upload photo</button>
+          <p class="upload-status" id="upload-status" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

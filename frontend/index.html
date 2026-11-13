@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111827">
+    <title>Scripture Study</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./index.html" aria-label="Scripture Study home">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span>Scripture <span class="brand-muted">Study</span></span>
+      </a>
+      <nav class="top-nav" aria-label="Main navigation">
+        <a class="nav-link active" href="#library" data-view="library" aria-current="page">Library</a>
+        <a class="nav-link" href="#today" data-view="today">Today</a>
+        <a class="nav-link" href="./upload.html">Add notes</a>
+      </nav>
+      <div class="vault-status">
+        <span class="status-dot"></span>
+        <span id="signed-in-email">Supabase</span>
+        <button class="button button-quiet" id="signout-button" type="button" hidden>Sign out</button>
+      </div>
+    </header>
+
+    <main class="auth-panel" id="auth-panel">
+      <form class="auth-card" id="auth-form">
+        <p class="eyebrow">YOUR PRIVATE STUDY SPACE</p>
+        <h1>Sign in to Scripture Study</h1>
+        <p class="subheading">Use an account invited to this Supabase project. Your notes are private to your account.</p>
+        <label for="auth-email">Email address</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" required>
+        <button class="button button-primary" type="submit">Email me a sign-in link</button>
+        <p class="auth-message" id="auth-message" role="status" aria-live="polite"></p>
+      </form>
+    </main>
+
+    <main class="app-shell" hidden>
+      <div class="workspace">
+        <section id="library-view" class="workspace-view" aria-labelledby="library-title">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">YOUR STUDY SPACE</p>
+            <h1>Good morning, reader.</h1>
+            <p class="subheading">A quiet place to read closely, make connections, and keep your notes.</p>
+          </div>
+          <div class="note-actions">
+            <button class="button button-quiet" id="import-notes-button" type="button">Import local notes</button>
+            <input id="import-notes-input" type="file" webkitdirectory directory multiple hidden>
+            <button class="button button-quiet" id="refresh-button" type="button">Refresh library</button>
+          </div>
+        </div>
+
+        <section id="library" aria-labelledby="library-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">THE LIBRARY</p>
+              <h2 id="library-title">Study folders</h2>
+            </div>
+            <p class="muted" id="library-count">Loading your vault…</p>
+          </div>
+          <div class="folder-grid" id="folder-grid" aria-live="polite"></div>
+        </section>
+
+        <section class="global-search" aria-labelledby="search-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ALL YOUR NOTES</p>
+              <h2 id="search-title">Search notes</h2>
+            </div>
+            <p class="muted" id="search-count" aria-live="polite"></p>
+          </div>
+          <form id="note-search-form" class="note-search-form">
+            <label class="search-query">
+              <span class="sr-only">Search note titles and content</span>
+              <input id="note-search-query" name="q" type="search" placeholder="Search titles, passages, or note text">
+            </label>
+            <label>
+              <span>Folder</span>
+              <select name="category">
+                <option value="all">All folders</option>
+                <option value="exegesis">Exegesis</option>
+                <option value="topics">Topics</option>
+                <option value="church-history">Church History</option>
+              </select>
+            </label>
+            <label>
+              <span>From</span>
+              <input name="date_from" type="date">
+            </label>
+            <label>
+              <span>To</span>
+              <input name="date_to" type="date">
+            </label>
+            <label>
+              <span>Sort by</span>
+              <select name="sort_by">
+                <option value="title">Title</option>
+                <option value="date">Date</option>
+                <option value="category">Folder</option>
+                <option value="modified">Recently modified</option>
+              </select>
+            </label>
+            <label>
+              <span>Order</span>
+              <select name="order">
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+              </select>
+            </label>
+            <button class="button button-primary" type="submit">Search</button>
+          </form>
+          <div class="search-results" id="search-results" aria-live="polite"></div>
+        </section>
+
+        <section class="notes-section" aria-labelledby="notes-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" id="current-folder-label">SELECT A FOLDER</p>
+              <h2 id="notes-title">Your notes</h2>
+            </div>
+            <div class="note-actions">
+              <button class="button button-primary" id="save-button" type="button" disabled>Save note</button>
+              <button class="button button-danger" id="delete-button" type="button" disabled hidden>Delete note</button>
+            </div>
+          </div>
+
+          <div class="note-browser" id="note-browser">
+            <div class="file-list" id="file-list" aria-label="Notes in selected folder">
+              <p class="empty-state">Choose a study folder to browse notes.</p>
+            </div>
+            <div class="note-workspace">
+              <div class="note-toolbar">
+                <div>
+                  <p class="eyebrow" id="note-path">NO NOTE OPEN</p>
+                  <input
+                    id="note-title"
+                    class="note-title-input"
+                    type="text"
+                    aria-label="Note title"
+                    aria-required="true"
+                    maxlength="200"
+                    value="Select a note to begin"
+                    disabled
+                  >
+                </div>
+                <span class="edit-hint">Tap or click text to edit</span>
+              </div>
+              <div class="note-document-actions">
+                <button class="button button-quiet" id="passage-toggle" type="button" hidden>Show Bible passage</button>
+                <button class="button button-quiet" id="add-note-image-button" type="button" hidden>Add image</button>
+                <input id="note-image-input" type="file" accept="image/*" hidden>
+                <button class="button button-quiet" id="photos-toggle" type="button" hidden>Show photos</button>
+                <button class="button button-quiet" id="source-toggle" type="button" hidden>Show note source</button>
+              </div>
+              <section class="note-extra-panel" id="photos-panel" aria-label="Attached photos" hidden>
+                <div class="note-photos" id="note-photos"></div>
+              </section>
+              <section class="note-extra-panel source-panel" id="source-panel" hidden>
+                <label for="note-source">Note metadata and Markdown source</label>
+                <textarea id="note-source" readonly spellcheck="false"></textarea>
+              </section>
+              <div
+                id="note-editor"
+                class="markdown-preview formatted-editor"
+                contenteditable="false"
+                role="textbox"
+                aria-label="Formatted note editor"
+                aria-multiline="true"
+                aria-disabled="true"
+              ><p class="empty-state">Select a note to read or edit…</p></div>
+            </div>
+            <div
+              class="pane-resizer"
+              id="pane-resizer"
+              role="separator"
+              aria-label="Resize note and Bible passage panes"
+              aria-orientation="vertical"
+              aria-valuemin="25"
+              aria-valuemax="75"
+              aria-valuenow="60"
+              tabindex="0"
+              hidden
+            ></div>
+            <aside class="passage-panel" id="passage-panel" aria-label="Bible passage" hidden>
+              <section class="panel-card esv-card" aria-labelledby="esv-title">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">BIBLE PASSAGE</p>
+                    <h2 id="esv-title">ESV reference</h2>
+                  </div>
+                  <span class="panel-icon" aria-hidden="true">⌕</span>
+                </div>
+                <form id="esv-form" class="esv-form">
+                  <label class="sr-only" for="esv-query">Bible passage reference</label>
+                  <input id="esv-query" name="q" type="search" placeholder="e.g. Genesis 4" autocomplete="off" required>
+                  <button class="button button-primary" id="esv-button" type="submit">Look up</button>
+                </form>
+                <div class="esv-result" id="esv-result" aria-live="polite" hidden></div>
+              </section>
+              <div
+                class="height-resizer passage-height-resizer"
+                id="passage-height-resizer"
+                role="separator"
+                aria-label="Resize Bible passage height"
+                aria-orientation="horizontal"
+                aria-valuemin="280"
+                aria-valuenow="480"
+                tabindex="0"
+              ></div>
+            </aside>
+          </div>
+          <div
+            class="height-resizer note-height-resizer"
+            id="note-height-resizer"
+            role="separator"
+            aria-label="Resize notes section height"
+            aria-orientation="horizontal"
+            aria-valuemin="480"
+            aria-valuenow="560"
+            tabindex="0"
+          ></div>
+        </section>
+        </section>
+
+        <section id="today-view" class="workspace-view" aria-labelledby="today-title" hidden>
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">YOUR DAILY RHYTHM</p>
+              <h1 id="today-title">Today's reading</h1>
+              <p class="subheading" id="today-date"></p>
+            </div>
+            <button class="button button-quiet" id="today-refresh-button" type="button">Refresh plan</button>
+          </div>
+
+          <section class="today-plan-card panel-card" aria-labelledby="today-plan-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">PLANNED FOR TODAY</p>
+                <h2 id="today-plan-title">Reading plan</h2>
+              </div>
+              <span class="panel-icon" aria-hidden="true">☼</span>
+            </div>
+            <div class="reading-progress">
+              <div class="progress-label">
+                <span id="today-progress-label">Loading today's plan…</span>
+                <span id="today-progress-percent">0%</span>
+              </div>
+              <div class="progress-track"><span id="today-progress-bar"></span></div>
+            </div>
+            <p class="empty-state" id="today-empty" hidden></p>
+            <ul class="reading-list today-reading-list" id="today-reading-list" aria-live="polite"></ul>
+            <p class="today-upcoming muted" id="today-upcoming" hidden></p>
+          </section>
+          <p class="today-footnote">Daily reading plans are stored with your notes in Supabase.</p>
+        </section>
+      </div>
+
+      <aside class="side-panel">
+        <div class="local-note">
+          <span class="local-note-icon" aria-hidden="true">⌂</span>
+          <p><strong>Your notes stay private.</strong><br>Notes and images are stored in your Supabase account.</p>
+        </div>
+      </aside>
+    </main>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
