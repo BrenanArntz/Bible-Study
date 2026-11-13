@@ -83,7 +83,7 @@ Deno.serve(async (request: Request) => {
           contents: [{
             parts: [
               {
-                text: "Transcribe only the handwritten content. Ignore printed page labels. Preserve wording and line breaks; do not summarize or correct. Inspect the top for a handwritten title, date, and E/T number. Split only clearly distinct notes. Return JSON with a notes array; each entry has transcription, category (exegesis, topics, or church-history), identifier, title, date (YYYY-MM-DD), and reference. Use empty strings for unknown values. E-numbers are exegesis, T-numbers are topics.",
+                text: "Transcribe all handwritten content in reading order. Ignore printed page labels. Preserve wording and line breaks; do not summarize or correct. Inspect the top and the full page for the handwritten note title, date, E/T number, and Bible passage. Normalize Bible book abbreviations (for example Eph. to Ephesians) in reference. If the title gives multiple chapters (for example Eph. 1,2), preserve the full range as Ephesians 1-2. Preserve chapter headings and use context to assign verse-numbered lines to the correct chapter. Split only clearly distinct notes. Return JSON with a notes array; each entry has transcription, category (exegesis, topics, or church-history), identifier, title, date (YYYY-MM-DD), and reference. Use empty strings for unknown values. E-numbers are exegesis, T-numbers are topics.",
               },
               { inlineData: { mimeType, data: btoa(binary) } },
             ],

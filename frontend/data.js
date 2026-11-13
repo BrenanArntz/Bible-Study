@@ -27,6 +27,9 @@ const bibleBookPattern = bibleBooks
   .map((book) => book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
   .join("|");
 const bibleReferencePattern = new RegExp(`\\b(${bibleBookPattern})(?![a-z])\\s+(\\d{1,3})`, "i");
+const bookAliases = { Eph: "Ephesians", Rom: "Romans", Matt: "Matthew", Phil: "Philippians", Col: "Colossians", Gal: "Galatians", Acts: "Acts", Ps: "Psalms", Jn: "John", 1Cor: "1 Corinthians", 2Cor: "2 Corinthians" };
+const allBibleNames = [...bibleBooks, ...Object.keys(bookAliases)];
+const allBiblePattern = allBibleNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
 
 function fail(error, prefix = "Supabase request failed") {
   if (error?.context?.json) {
@@ -369,12 +372,14 @@ function makeTitle(identifier, title, reference, fallback) {
 }
 
 function addVerseReferences(markdown, title, reference) {
-  const passagePattern = /\b(Ephesians|Eph\.?)[\s]+(\d{1,3})(?:\s*[,/&]\s*(\d{1,3}))*/i;
+  const passagePattern = /\b(Ephesians|Eph\.?|Romans|Rom\.?|Matthew|Matt\.?|Philippians|Phil\.?|Colossians|Col\.?|Galatians|Gal\.?|Psalms?|Ps\.?|John|Jn\.?|Acts)\s+(\d{1,3})(?:\s*[,/&]\s*(\d{1,3}))?/i;
   const passage = [reference, title].map((value) => String(value || "").match(passagePattern)).find(Boolean);
   if (!passage) return markdown;
 
-  const book = "Ephesians";
+  const capturedBook = passage[1].replace(/\./g, "");
+  const book = ({ Eph: "Ephesians", Rom: "Romans", Matt: "Matthew", Phil: "Philippians", Col: "Colossians", Gal: "Galatians", Ps: "Psalms", P: "Psalms", Jn: "John" })[capturedBook] || capturedBook;
   let chapter = Number(passage[2]);
+  let previousVerse = 0;
   const chapterHeading = new RegExp(
     `^\\s*(?:#{1,6}\\s*)?${book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(\\d{1,3})\\s*:?\\s*$`,
     "i",
@@ -387,8 +392,12 @@ function addVerseReferences(markdown, title, reference) {
       return line;
     }
 
-    const verse = line.match(/^(\s*)(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?(\s+\S.*)$/);
+    const normalizedLine = line.replace(/^(\s*\d{1,3})[.)](?=\s)/, "$1");
+    const verse = normalizedLine.match(/^(\s*)(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?(\s+\S.*)$/);
     if (!verse) return line;
+    const verseNumber = Number(verse[2]);
+    if (verseNumber < previousVerse && passage[3] && chapter < Number(passage[2]) + Number(passage[3])) chapter += 1;
+    previousVerse = verseNumber;
     const range = verse[3] ? `-${verse[3]}` : "";
     return `${verse[1]}${book} ${chapter}:${verse[2]}${range}${verse[4]}`;
   }).join("\n");
@@ -417,14 +426,14 @@ function createNewContent({ title, identifier, date, reference, markdown, filena
   return `${frontmatter}\n\n# ${title}\n\n## Image upload — ${new Date().toISOString()}\n\n<!-- image-transcription:${filename} -->\n\n${transcription}\n\n![Uploaded handwritten page](${relativeImagePath(path, filename)})\n`;
 }
 
-async function appendUpload(path, content, filename, markdown) {
+async function appendUpload(path, content, filename, markdown, title, reference) {
   const addition = [
     "",
     `## Image upload — ${new Date().toISOString()}`,
     "",
     `<!-- image-transcription:${filename} -->`,
     "",
-    markdown.trim() || "No readable text was detected.",
+    addVerseReferences(markdown.trim(), title, reference) || "No readable text was detected.",
     "",
     `![Uploaded handwritten page](${relativeImagePath(path, filename)})`,
   ].join("\n");
@@ -497,7 +506,7 @@ async function createFromUpload(file, targetPath, continuationPath) {
       const current = notesByPath.get(item.path);
       writeStarted = true;
       if (current) {
-        await appendUpload(item.path, current.content, filename, markdown);
+        await appendUpload(item.path, current.content, filename, markdown, item.title, item.reference);
       } else {
         const content = createNewContent({ ...item, markdown, filename });
         await insertNote(item.path, content);
@@ -711,7 +720,8 @@ async function noteImageAction(path, method, params, formData) {
         const result = await transcribeUploadedImage(file);
         const text = result.notes.map((item) => item.transcription).filter(Boolean).join("\n\n");
         if (!text) throw new Error("No handwritten text could be regenerated from this image.");
-        content = replaceTranscription(content, filename, text);
+        const title = note.title || note.content.match(/^title:\s*["']?(.+?)["']?\s*$/m)?.[1] || "";
+        content = replaceTranscription(content, filename, addVerseReferences(text, title, note.reference));
       }
       content = replaceImageLinks(content, filename, nextName);
       writeStarted = true;
@@ -838,10 +848,17 @@ export async function apiRequest(url, options = {}) {
     }
     if (method === "DELETE") {
       if (notePath.startsWith("daily/")) throw new Error("Reading plan entries cannot be deleted here.");
+      const existing = await noteByPath(notePath);
+      const filenames = imageReferences(existing.content);
       const { data, error } = await supabase.from("study_notes").delete().eq("path", safePath(notePath)).select("path");
       if (error) return fail(error, "Could not delete note");
       if (!data?.length) throw new Error("Note not found or you do not have permission to delete it.");
-      return { path: notePath, status: "deleted" };
+      const remaining = await allNotes();
+      const stillUsed = new Set(remaining.flatMap((item) => imageReferences(item.content)));
+      const orphaned = [...new Set(filenames)].filter((filename) => !stillUsed.has(filename));
+      const user = await currentUser();
+      await storageDelete(orphaned.map((filename) => `${user.id}/${filename}`));
+      return { path: notePath, status: "deleted", images_deleted: orphaned.length };
     }
   }
   if (path === "/api/import-notes" && method === "POST") return importNotes(options.body);

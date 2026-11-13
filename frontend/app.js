@@ -114,12 +114,14 @@ const bibleBookNames = [
   "1\\s*Pet\\.?", "2\\s*Pet\\.?", "1\\s*Jn\\.?", "2\\s*Jn\\.?", "3\\s*Jn\\.?",
 ].sort((left, right) => right.length - left.length);
 const bibleReferencePattern = new RegExp(
-  `\\b(${bibleBookNames.join("|")})(?![a-z])\\s+(\\d{1,3}(?:\\s*:\\s*\\d+(?:\\s*[-–]\\s*\\d+)?)?)`,
+  `\\b(${bibleBookNames.join("|")})(?![a-z])\\s+(\\d{1,3}(?:\\s*[,/]\\s*\\d{1,3})?(?:\\s*:\\s*\\d+(?:\\s*[-–]\\s*\\d+)?)?)`,
   "i",
 );
 const bibleBookDisplayNames = new Map([
   ["jn", "John"],
   ["john", "John"],
+  ["eph", "Ephesians"],
+  ["ephesians", "Ephesians"],
 ]);
 
 async function requestJson(url, options = {}) {
@@ -319,6 +321,7 @@ function findBibleReference(text) {
   const passage = match[2]
     .replace(/\s+/g, " ")
     .replace(/\s*:\s*/g, ":")
+    .replace(/\s*[,/]\s*/g, "-")
     .replace(/\s*([–-])\s*/g, "$1")
     .trim();
   return `${displayName} ${passage}`;
@@ -1185,7 +1188,7 @@ async function saveNote() {
 
 async function deleteNote() {
   const path = state.activeNotePath;
-  if (!path || !window.confirm(`Delete "${state.noteTitle}"? This removes the note from your vault. Attached photos will be kept.`)) {
+  if (!path || !window.confirm(`Delete "${state.noteTitle}"? Images used by another note will stay; unused attached images will be removed from storage.`)) {
     return;
   }
 
@@ -1222,7 +1225,7 @@ async function deleteNote() {
       elements.saveButton.disabled = true;
       elements.deleteButton.hidden = true;
     }
-    showToast("Note deleted. Attached photos were kept.");
+    showToast("Note deleted. Unused attached images were removed from storage.");
     await loadVault();
   } catch (error) {
     showToast(error.message, true);
