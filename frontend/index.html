@@ -31,7 +31,7 @@
     <header class="topbar">
       <a class="brand" href="./index.html" aria-label="Scripture Study home">
         <span class="brand-mark" aria-hidden="true">✦</span>
-        <span>Scripture <span class="brand-muted">Study</span></span>
+        <than>Scripture <span class="brand-muted">Study</span></span>
       </a>
       <nav class="top-nav" aria-label="Main navigation">
         <a class="nav-link active" href="#library" data-view="library" aria-current="page">Library</a>
@@ -69,8 +69,6 @@
             <p class="subheading">A quiet place to read closely, make connections, and keep your notes.</p>
           </div>
           <div class="note-actions">
-            <button class="button button-quiet" id="import-notes-button" type="button">Import local notes</button>
-            <input id="import-notes-input" type="file" webkitdirectory directory multiple hidden>
             <button class="button button-quiet" id="refresh-button" type="button">Refresh library</button>
           </div>
         </div>
@@ -287,6 +285,7 @@
             </div>
             <div class="today-actions">
               <button class="button button-quiet" id="today-task-settings-button" type="button" aria-expanded="false" aria-controls="today-task-settings">Task settings</button>
+              <button class="button button-quiet" id="book-plan-settings-button" type="button" aria-expanded="false" aria-controls="book-plan-settings">Book plan settings</button>
               <button class="button button-quiet" id="today-refresh-button" type="button">Refresh plan</button>
             </div>
           </div>
@@ -295,7 +294,7 @@
             <div class="panel-heading"><div><p class="eyebrow">RECURRING ROUTINE</p><h2>Task settings</h2></div></div>
             <form id="today-task-form" class="task-settings-form">
               <input id="task-edit-id" type="hidden">
-              <label>Task type<select id="task-type"><option value="personal-reading">Personal Reading</option><option value="reading-with-haley">Reading with Haley</option><option value="verse-quiz">Verse Quiz</option><option value="greek">Reviewing Greek</option><option value="church-history">Church History Study</option><option value="other">Other</option></select></label>
+              <label>Task type<select id="task-type"><option value="verse-quiz">Verse Quiz</option><option value="greek">Reviewing Greek</option><option value="church-history">Church History Study</option><option value="other">Other</option><optgroup label="Existing reading tasks"><option value="personal-reading" disabled>Personal Reading</option><option value="reading-with-haley" disabled>Reading with Haley</option></optgroup></select></label>
               <label>Task name<input id="task-title" maxlength="120" required placeholder="e.g. John 3:1–21"></label>
               <label class="task-details-field">Details or verses<input id="task-details" maxlength="300" placeholder="Passage, verses, or study focus"></label>
               <fieldset class="task-days"><legend>Repeat on</legend>
@@ -306,32 +305,52 @@
             <ul id="task-settings-list" class="task-settings-list"></ul>
           </section>
 
+          <section id="book-plan-settings" class="today-task-settings panel-card book-plan-settings" hidden>
+            <div class="panel-heading">
+              <div><p class="eyebrow">READ THROUGH BOOKS</p><h2>Book plan settings</h2></div>
+            </div>
+            <form id="book-plan-form" class="book-plan-form">
+              <input id="book-plan-edit-id" type="hidden">
+              <label>Plan name<input id="book-plan-title" maxlength="120" required placeholder="e.g. Old Testament foundations"></label>
+              <label>Plan type<select id="book-plan-mode"><option value="books">Read whole books</option><option value="chapters">Choose specific chapters</option></select></label>
+              <label id="book-plan-books-field">Books in order<input id="book-plan-books" placeholder="e.g. Genesis, Exodus"></label>
+              <label id="book-plan-selections-field" hidden>Chapters to read<input id="book-plan-selections" placeholder="Genesis 4, 7-9; Exodus 2, 5"><small>Separate books with semicolons; list chapters or ranges with commas.</small></label>
+              <label>Chapters per reading<input id="book-plan-chapters" type="number" min="1" max="50" value="2" required></label>
+              <label>Read every (days)<input id="book-plan-interval" type="number" min="1" max="365" value="1" required></label>
+              <label>Start date<input id="book-plan-start-date" type="date" required></label>
+              <div class="book-plan-form-actions">
+                <button class="button button-primary" id="book-plan-save-button" type="submit">Create plan</button>
+                <button class="button button-quiet" id="book-plan-cancel" type="button">Cancel</button>
+              </div>
+              <p class="book-plan-edit-warning muted" id="book-plan-edit-warning" hidden>Changing the passages, pace, or start date resets this plan's completion history.</p>
+            </form>
+            <p class="empty-state" id="book-plans-empty" hidden></p>
+            <ul class="book-plan-list" id="book-plan-list" aria-live="polite"></ul>
+          </section>
+
           <section class="today-plan-card panel-card today-tasks-card" aria-labelledby="today-tasks-title">
             <div class="panel-heading"><div><p class="eyebrow">RECURRING ROUTINE</p><h2 id="today-tasks-title">Today's tasks</h2></div></div>
             <p class="empty-state" id="today-tasks-empty" hidden></p>
             <ul class="reading-list today-reading-list" id="today-task-list" aria-live="polite"></ul>
           </section>
 
-          <section class="today-plan-card panel-card" aria-labelledby="today-plan-title">
+          <section class="today-plan-card panel-card book-plans-card" aria-labelledby="book-reading-title">
             <div class="panel-heading">
-              <div>
-                <p class="eyebrow">PLANNED FOR TODAY</p>
-                <h2 id="today-plan-title">Reading plan</h2>
-              </div>
-              <span class="panel-icon" aria-hidden="true">☼</span>
+              <div><p class="eyebrow">SCHEDULED READINGS</p><h2 id="book-reading-title">Book reading plan</h2></div>
+              <div class="book-plan-controls"><label>Schedule date<input id="book-plan-date" type="date" aria-label="Show readings scheduled for"></label></div>
             </div>
+            <p class="muted book-plan-date-hint">Choose a date to view or check off readings, including future dates if you read ahead.</p>
             <div class="reading-progress">
               <div class="progress-label">
-                <span id="today-progress-label">Loading today's plan…</span>
-                <span id="today-progress-percent">0%</span>
+                <span id="book-plan-progress-label">Loading scheduled readings…</span>
+                <span id="book-plan-progress-percent">0%</span>
               </div>
-              <div class="progress-track"><span id="today-progress-bar"></span></div>
+              <div class="progress-track"><span id="book-plan-progress-bar"></span></div>
             </div>
-            <p class="empty-state" id="today-empty" hidden></p>
-            <ul class="reading-list today-reading-list" id="today-reading-list" aria-live="polite"></ul>
-            <p class="today-upcoming muted" id="today-upcoming" hidden></p>
+            <p class="empty-state" id="book-plan-today-empty" hidden></p>
+            <ul class="reading-list today-reading-list" id="book-plan-today-list" aria-live="polite"></ul>
+            <p class="today-upcoming muted" id="book-plan-upcoming" hidden></p>
           </section>
-          <p class="today-footnote">Daily reading plans are stored with your notes in Supabase.</p>
         </section>
       </div>
 

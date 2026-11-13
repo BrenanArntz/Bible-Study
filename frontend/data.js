@@ -5,31 +5,28 @@ const FOLDER_NAMES = {
   exegesis: "Exegesis",
   topics: "Topics",
   "church-history": "Church History",
-  daily: "Daily",
 };
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const IMAGE_LINK = /!\[([^\]]*)\]\(([^)]+)\)/g;
-const bibleBooks = [
-  "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges",
-  "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles",
-  "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs",
-  "Ecclesiastes", "Song of Solomon", "Song of Songs", "Isaiah", "Jeremiah",
-  "Lamentations",
-  "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah",
-  "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi", "Matthew",
-  "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians",
-  "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians",
-  "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews",
-  "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude",
-  "Revelation",
-].sort((left, right) => right.length - left.length);
-const bibleBookPattern = bibleBooks
-  .map((book) => book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-  .join("|");
-const bibleReferencePattern = new RegExp(`\\b(${bibleBookPattern})(?![a-z])\\s+(\\d{1,3})`, "i");
-const bookAliases = { Eph: "Ephesians", Rom: "Romans", Matt: "Matthew", Phil: "Philippians", Col: "Colossians", Gal: "Galatians", Acts: "Acts", Ps: "Psalms", Jn: "John", "1Cor": "1 Corinthians", "2Cor": "2 Corinthians" };
-const allBibleNames = [...bibleBooks, ...Object.keys(bookAliases)];
-const allBiblePattern = allBibleNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+export const BIBLE_CHAPTER_COUNTS = new Map([
+  ["genesis", 50], ["exodus", 40], ["leviticus", 27], ["numbers", 36],
+  ["deuteronomy", 34], ["joshua", 24], ["judges", 21], ["ruth", 4],
+  ["1 samuel", 31], ["2 samuel", 24], ["1 kings", 22], ["2 kings", 25],
+  ["1 chronicles", 29], ["2 chronicles", 36], ["ezra", 10], ["nehemiah", 13],
+  ["esther", 10], ["job", 42], ["psalms", 150], ["proverbs", 31],
+  ["ecclesiastes", 12], ["song of solomon", 8], ["song of songs", 8],
+  ["isaiah", 66], ["jeremiah", 52], ["lamentations", 5], ["ezekiel", 48],
+  ["daniel", 12], ["hosea", 14], ["joel", 3], ["amos", 9], ["obadiah", 1],
+  ["jonah", 4], ["micah", 7], ["nahum", 3], ["habakkuk", 3],
+  ["zephaniah", 3], ["haggai", 2], ["zechariah", 14], ["malachi", 4],
+  ["matthew", 28], ["mark", 16], ["luke", 24], ["john", 21], ["acts", 28],
+  ["romans", 16], ["1 corinthians", 16], ["2 corinthians", 13],
+  ["galatians", 6], ["ephesians", 6], ["philippians", 4], ["colossians", 4],
+  ["1 thessalonians", 5], ["2 thessalonians", 3], ["1 timothy", 6],
+  ["2 timothy", 4], ["titus", 3], ["philemon", 1], ["hebrews", 13],
+  ["james", 5], ["1 peter", 5], ["2 peter", 3], ["1 john", 5],
+  ["2 john", 1], ["3 john", 1], ["jude", 1], ["revelation", 22],
+]);
 
 function fail(error, prefix = "Supabase request failed") {
   if (error?.context?.json) {
@@ -147,8 +144,6 @@ function noteFields(path, content, modifiedAt = new Date().toISOString()) {
     note_date: date,
     identifier,
     reference: typeof metadata.reference === "string" ? metadata.reference.trim() : "",
-    reading: metadata.reading ?? metadata.readings ?? null,
-    completed: metadata.completed === true,
     updated_at: modifiedAt,
   };
 }
@@ -156,7 +151,7 @@ function noteFields(path, content, modifiedAt = new Date().toISOString()) {
 async function allNotes() {
   const { data, error } = await supabase
     .from("study_notes")
-    .select("id,user_id,path,content,title,category,note_date,identifier,reference,reading,completed,created_at,updated_at")
+    .select("id,user_id,path,content,title,category,note_date,identifier,reference,created_at,updated_at")
     .order("path");
   if (error) return fail(error, "Could not load notes");
   return data || [];
@@ -174,19 +169,9 @@ async function noteByPath(path) {
   return data;
 }
 
-function enrichBibleReferences(content) {
-  const { metadata, body } = parseFrontmatter(content);
-  const heading = body.match(/^#\s+(.+?)\s*$/m)?.[1] || "";
-  const title = typeof metadata.title === "string" ? metadata.title.trim() || heading : heading;
-  const reference = typeof metadata.reference === "string" ? metadata.reference.trim() : "";
-  const enriched = addVerseReferences(body, title, reference);
-  return enriched === body ? content : `${content.slice(0, content.length - body.length)}${enriched}`;
-}
-
 async function saveNote(path, content) {
   const user = await currentUser();
-  const enrichedContent = enrichBibleReferences(content);
-  const fields = noteFields(path, enrichedContent);
+  const fields = noteFields(path, content);
   const { data, error } = await supabase
     .from("study_notes")
     .update({ ...fields, user_id: user.id })
@@ -195,7 +180,7 @@ async function saveNote(path, content) {
     .maybeSingle();
   if (error) return fail(error, "Could not save note");
   if (!data) throw new Error("Note not found or you do not have permission to edit it.");
-  return { path: data.path, status: "saved", content: enrichedContent };
+  return { path: data.path, status: "saved", content };
 }
 
 async function insertNote(path, content) {
@@ -381,48 +366,6 @@ function makeTitle(identifier, title, reference, fallback) {
   return base || "Handwritten note";
 }
 
-function addVerseReferences(markdown, title, reference) {
-  const passagePattern = /\b(Ephesians|Eph\.?|Romans|Rom\.?|Matthew|Matt\.?|Philippians|Phil\.?|Colossians|Col\.?|Galatians|Gal\.?|Psalms?|Ps\.?|John|Jn\.?|Acts)\s+(\d{1,3})(?:\s*[,/&]\s*(\d{1,3}))?/i;
-  const passage = [reference, title].map((value) => String(value || "").match(passagePattern)).find(Boolean);
-  if (!passage) return markdown;
-
-  const capturedBook = passage[1].replace(/\./g, "");
-  const book = ({ Eph: "Ephesians", Rom: "Romans", Matt: "Matthew", Phil: "Philippians", Col: "Colossians", Gal: "Galatians", Ps: "Psalms", P: "Psalms", Jn: "John" })[capturedBook] || capturedBook;
-  let chapter = Number(passage[2]);
-  let previousVerse = 0;
-  const chapterHeading = new RegExp(
-    `^\\s*(?:#{1,6}\\s*)?${book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(\\d{1,3})\\s*:?\\s*$`,
-    "i",
-  );
-  const bibleLink = (value) => `[[bible:${value}|${value}]]`;
-  return markdown.split(/\r?\n/).map((line) => {
-    const heading = line.match(chapterHeading)
-      || line.match(/^\s*(?:#{1,6}\s*)?chapter\s+(\d{1,3})\s*:?\s*$/i);
-    if (heading) {
-      chapter = Number(heading[1]);
-      return line;
-    }
-
-    const normalizedLine = line.replace(/^(\s*\d{1,3})[.)](?=\s)/, "$1");
-    const chapterVerse = normalizedLine.match(/^(\s*)(\d{1,3})\s*:\s*(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?(\s+\S.*)$/);
-    if (chapterVerse) {
-      chapter = Number(chapterVerse[2]);
-      previousVerse = Number(chapterVerse[3]);
-      const range = chapterVerse[4] ? `-${chapterVerse[4]}` : "";
-      const value = `${book} ${chapter}:${chapterVerse[3]}${range}`;
-      return `${chapterVerse[1]}${bibleLink(value)}${chapterVerse[5]}`;
-    }
-    const verse = normalizedLine.match(/^(\s*)(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?(\s+\S.*)$/);
-    if (!verse) return line;
-    const verseNumber = Number(verse[2]);
-    if (verseNumber < previousVerse && passage[3] && chapter < Number(passage[2]) + Number(passage[3])) chapter += 1;
-    previousVerse = verseNumber;
-    const range = verse[3] ? `-${verse[3]}` : "";
-    const value = `${book} ${chapter}:${verse[2]}${range}`;
-    return `${verse[1]}${bibleLink(value)}${verse[4]}`;
-  }).join("\n");
-}
-
 function slug(value) {
   return value.toLocaleLowerCase()
     .replace(/\s*-\s*/g, "-")
@@ -441,19 +384,18 @@ function createNewContent({ title, identifier, date, reference, markdown, filena
     ...(reference ? [`reference: ${JSON.stringify(reference)}`] : []),
     "---",
   ].join("\n");
-  const transcription = addVerseReferences(markdown.trim(), title, reference)
-    || "No readable text was detected.";
+  const transcription = markdown.trim() || "No readable text was detected.";
   return `${frontmatter}\n\n# ${title}\n\n## Image upload — ${new Date().toISOString()}\n\n<!-- image-transcription:${filename} -->\n\n${transcription}\n\n![Uploaded handwritten page](${relativeImagePath(path, filename)})\n`;
 }
 
-async function appendUpload(path, content, filename, markdown, title, reference) {
+async function appendUpload(path, content, filename, markdown) {
   const addition = [
     "",
     `## Image upload — ${new Date().toISOString()}`,
     "",
     `<!-- image-transcription:${filename} -->`,
     "",
-    addVerseReferences(markdown.trim(), title, reference) || "No readable text was detected.",
+    markdown.trim() || "No readable text was detected.",
     "",
     `![Uploaded handwritten page](${relativeImagePath(path, filename)})`,
   ].join("\n");
@@ -526,7 +468,7 @@ async function createFromUpload(file, targetPath, continuationPath) {
       const current = notesByPath.get(item.path);
       writeStarted = true;
       if (current) {
-        await appendUpload(item.path, current.content, filename, markdown, item.title, item.reference);
+        await appendUpload(item.path, current.content, filename, markdown);
       } else {
         const content = createNewContent({ ...item, markdown, filename });
         await insertNote(item.path, content);
@@ -630,6 +572,233 @@ function searchNotes(params) {
 }
 
 const TASK_TYPES = ["personal-reading", "reading-with-haley", "verse-quiz", "greek", "church-history", "other"];
+const UUID_PATTERN = /^[0-9a-f-]{36}$/i;
+
+function validDateKey(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+}
+
+function dateDayNumber(date) {
+  return Date.parse(`${date}T00:00:00Z`) / 86400000;
+}
+
+function dateFromDayNumber(dayNumber) {
+  return new Date(dayNumber * 86400000).toISOString().slice(0, 10);
+}
+
+function canonicalBookName(value) {
+  const canonical = [...BIBLE_CHAPTER_COUNTS.keys()].find((name) => name.toLowerCase() === value.trim().toLowerCase());
+  if (!canonical) throw new Error(`Unknown Bible book: ${value}. Use full book names.`);
+  return canonical.replace(/\b\w/g, (letter) => letter.toUpperCase()).replace(/\b(Of|The)\b/g, (word) => word.toLowerCase());
+}
+
+function normalizeChapterSelections(value) {
+  const groups = String(value || "").split(";").map((group) => group.trim()).filter(Boolean);
+  if (!groups.length) throw new Error("Enter chapter selections, such as Genesis 4, 7-9; Exodus 2.");
+  const selections = [];
+  const selectedChapters = new Set();
+  for (const group of groups) {
+    const match = group.match(/^(.+?)\s+(\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*)$/);
+    if (!match) throw new Error(`Could not read chapter selection: ${group}. Separate books with semicolons.`);
+    const book = canonicalBookName(match[1]);
+    const chapterCount = BIBLE_CHAPTER_COUNTS.get(book.toLowerCase());
+    for (const selection of match[2].split(",")) {
+      const range = selection.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+      const start = Number(range[1]);
+      const end = Number(range[2] || start);
+      if (start < 1 || end < start || end > chapterCount) {
+        throw new Error(`${book} has chapters 1–${chapterCount}; check the selection “${selection.trim()}”.`);
+      }
+      for (let chapter = start; chapter <= end; chapter += 1) {
+        const key = `${book.toLowerCase()}:${chapter}`;
+        if (selectedChapters.has(key)) throw new Error(`${book} ${chapter} is selected more than once.`);
+        selectedChapters.add(key);
+      }
+      selections.push({ book, start, end });
+    }
+  }
+  return selections;
+}
+
+function chapterSegments(plan) {
+  return plan.chapter_selections?.length
+    ? plan.chapter_selections
+    : plan.books.map((book) => ({ book, start: 1, end: BIBLE_CHAPTER_COUNTS.get(book.toLowerCase()) }));
+}
+
+function totalChapterCount(plan) {
+  return chapterSegments(plan).reduce((total, segment) => total + segment.end - segment.start + 1, 0);
+}
+
+function formatChapterSelections(selections) {
+  const groups = [];
+  for (const selection of selections) {
+    let group = groups.at(-1);
+    if (!group || group.book !== selection.book) {
+      group = { book: selection.book, ranges: [] };
+      groups.push(group);
+    }
+    group.ranges.push(`${selection.start}${selection.start === selection.end ? "" : `–${selection.end}`}`);
+  }
+  return groups.map((group) => `${group.book} ${group.ranges.join(", ")}`).join("; ");
+}
+
+function readingForOffset(plan, offset) {
+  const firstChapter = offset * plan.chapters_per_reading + 1;
+  if (firstChapter > plan.total_chapters) return null;
+  const lastChapter = Math.min(plan.total_chapters, firstChapter + plan.chapters_per_reading - 1);
+  let chapterOffset = 0;
+  const passages = [];
+  for (const segment of chapterSegments(plan)) {
+    const segmentLength = segment.end - segment.start + 1;
+    const segmentEnd = chapterOffset + segmentLength;
+    const overlapStart = Math.max(firstChapter, chapterOffset + 1);
+    const overlapEnd = Math.min(lastChapter, segmentEnd);
+    if (overlapStart <= overlapEnd) {
+      const start = segment.start + overlapStart - chapterOffset - 1;
+      const end = segment.start + overlapEnd - chapterOffset - 1;
+      const previous = passages.at(-1);
+      if (previous && previous.book === segment.book && previous.end + 1 === start) {
+        previous.end = end;
+      } else {
+        passages.push({ book: segment.book, start, end });
+      }
+    }
+    chapterOffset = segmentEnd;
+    if (chapterOffset >= lastChapter) break;
+  }
+  return formatChapterSelections(passages);
+}
+
+function normalizeReadingPlan(payload) {
+  const title = String(payload.title || "").trim();
+  const chapterSelections = payload.reading_mode === "chapters" ? normalizeChapterSelections(payload.chapter_selections) : null;
+  const books = chapterSelections
+    ? [...new Set(chapterSelections.map((selection) => selection.book))]
+    : [...new Set(
+      (Array.isArray(payload.books) ? payload.books : String(payload.books || "").split(","))
+        .map((book) => String(book).trim())
+        .filter(Boolean)
+        .map(canonicalBookName),
+    )];
+  const chaptersPerReading = Number(payload.chapters_per_reading);
+  const intervalDays = Number(payload.interval_days);
+  const startDate = String(payload.start_date || "");
+  if (!title || title.length > 120 || !books.length || !Number.isInteger(chaptersPerReading) || chaptersPerReading < 1 || chaptersPerReading > 50
+    || !Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 365 || !validDateKey(startDate)) {
+    throw new Error("Enter a plan name, one or more books, a valid chapter amount, interval, and start date.");
+  }
+  return {
+    title,
+    books,
+    chapter_selections: chapterSelections,
+    chapters_per_reading: chaptersPerReading,
+    interval_days: intervalDays,
+    start_date: startDate,
+  };
+}
+
+async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
+  if (!validDateKey(date)) throw new Error("Use a valid reading plan date.");
+  const [{ data: plans, error: planError }, { data: completions, error: completionError }] = await Promise.all([
+    supabase.from("study_reading_plans")
+      .select("id,title,books,chapter_selections,chapters_per_reading,interval_days,start_date")
+      .order("created_at"),
+    supabase.from("study_reading_plan_completions").select("plan_id").eq("scheduled_date", date),
+  ]);
+  if (planError) return fail(planError, "Could not load book reading plans");
+  if (completionError) return fail(completionError, "Could not load book reading completions");
+  const completedCounts = await Promise.all((plans || []).map(async (plan) => {
+    const { count, error } = await supabase.from("study_reading_plan_completions")
+      .select("plan_id", { count: "exact", head: true })
+      .eq("plan_id", plan.id);
+    if (error) return fail(error, "Could not count completed book readings");
+    return [plan.id, count || 0];
+  }));
+  const completedByPlan = new Map(completedCounts);
+  const completedToday = new Set((completions || []).map((completion) => completion.plan_id));
+  const todayNumber = dateDayNumber(date);
+  const items = (plans || []).map((plan) => {
+    const totalChapters = totalChapterCount(plan);
+    const totalReadings = Math.ceil(totalChapters / plan.chapters_per_reading);
+    const planStart = dateDayNumber(plan.start_date);
+    const todayOffset = todayNumber - planStart;
+    const todayIndex = todayOffset >= 0 && todayOffset % plan.interval_days === 0
+      ? todayOffset / plan.interval_days
+      : -1;
+    const nextIndex = Math.max(0, Math.ceil(Math.max(0, todayOffset) / plan.interval_days));
+    const todayReading = todayIndex >= 0 ? readingForOffset({ ...plan, total_chapters: totalChapters }, todayIndex) : null;
+    const nextReading = todayReading ? null : readingForOffset({ ...plan, total_chapters: totalChapters }, nextIndex);
+    const nextDate = todayReading ? date : dateFromDayNumber(planStart + nextIndex * plan.interval_days);
+    return {
+      ...plan,
+      reading_scope: plan.chapter_selections?.length ? formatChapterSelections(plan.chapter_selections) : plan.books.join(" + "),
+      total_chapters: totalChapters,
+      total_readings: totalReadings,
+      finish_date: dateFromDayNumber(planStart + (totalReadings - 1) * plan.interval_days),
+      completed_readings: completedByPlan.get(plan.id) || 0,
+      today_reading: todayReading ? { reference: todayReading, completed: completedToday.has(plan.id) } : null,
+      next_reading: nextReading ? { date: nextDate, reference: nextReading } : null,
+    };
+  });
+  return { items, date };
+}
+
+async function saveBookReadingPlan(payload, id = "") {
+  const user = await currentUser();
+  const values = { ...normalizeReadingPlan(payload), user_id: user.id };
+  const query = id
+    ? supabase.from("study_reading_plans").update(values).eq("id", id).select("id").maybeSingle()
+    : supabase.from("study_reading_plans").insert(values).select("id").single();
+  const { data, error } = await query;
+  if (error) return fail(error, "Could not save book reading plan");
+  if (!data) throw new Error("Reading plan not found or you do not have permission to edit it.");
+  return { id: data.id, status: id ? "updated" : "created" };
+}
+
+async function toggleBookReading(planId, date) {
+  if (!UUID_PATTERN.test(planId) || !validDateKey(date)) throw new Error("Invalid book reading completion.");
+  const user = await currentUser();
+  const { data: plan, error: planError } = await supabase.from("study_reading_plans")
+    .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date")
+    .eq("id", planId)
+    .maybeSingle();
+  if (planError) return fail(planError, "Could not load book reading plan");
+  if (!plan) throw new Error("Reading plan not found or you do not have permission to access it.");
+  const totalChapters = totalChapterCount(plan);
+  const daysSinceStart = dateDayNumber(date) - dateDayNumber(plan.start_date);
+  const readingIndex = daysSinceStart / plan.interval_days;
+  if (daysSinceStart < 0 || !Number.isInteger(readingIndex)
+    || !readingForOffset({ ...plan, total_chapters: totalChapters }, readingIndex)) {
+    throw new Error("There is no reading scheduled for this plan on that date.");
+  }
+  const { data: existing, error: findError } = await supabase.from("study_reading_plan_completions")
+    .select("plan_id")
+    .eq("plan_id", planId)
+    .eq("scheduled_date", date)
+    .maybeSingle();
+  if (findError) return fail(findError, "Could not check book reading completion");
+  const query = existing
+    ? supabase.from("study_reading_plan_completions").delete().eq("plan_id", planId).eq("scheduled_date", date)
+    : supabase.from("study_reading_plan_completions").insert({
+      plan_id: planId,
+      user_id: user.id,
+      scheduled_date: date,
+    });
+  const { error } = await query;
+  if (error) return fail(error, "Could not update book reading completion");
+  return { completed: !existing };
+}
+
+async function deleteBookReadingPlan(id) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid book reading plan.");
+  const { data, error } = await supabase.from("study_reading_plans").delete().eq("id", id).select("id");
+  if (error) return fail(error, "Could not delete book reading plan");
+  if (!data?.length) throw new Error("Reading plan not found or you do not have permission to delete it.");
+  return { status: "deleted" };
+}
 
 async function taskPlan(date = new Date().toISOString().slice(0, 10)) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Use a valid task date.");
@@ -686,39 +855,6 @@ async function deleteTask(id) {
   if (error) return fail(error, "Could not delete recurring task");
   if (!data?.length) throw new Error("Task not found or you do not have permission to delete it.");
   return { status: "deleted" };
-}
-
-function readingPlan() {
-  return allNotes().then((notes) => ({
-    items: notes
-      .filter((note) => note.category === "daily" && note.note_date)
-      .sort((left, right) => left.note_date.localeCompare(right.note_date))
-      .map((note) => ({
-        filename: note.path.split("/").at(-1),
-        path: note.path,
-        date: note.note_date,
-        reading: note.reading || "",
-        completed: note.completed,
-      })),
-  }));
-}
-
-async function toggleReading(filename) {
-  if (filename.includes("/") || filename.includes("\\") || !filename.endsWith(".md")) {
-    throw new Error("Provide a daily note filename ending in .md.");
-  }
-  const path = `daily/${filename}`;
-  const note = await noteByPath(path);
-  const frontmatter = note.content.match(/^---\r?\n([\s\S]*?)\r?\n---(?=\r?\n|$)/);
-  if (!frontmatter) throw new Error("Daily note must have YAML frontmatter.");
-  const completed = !note.completed;
-  const fields = frontmatter[1];
-  const updatedFields = /^completed\s*:/m.test(fields)
-    ? fields.replace(/^completed\s*:.*$/m, `completed: ${completed}`)
-    : `${fields}\ncompleted: ${completed}`;
-  const content = note.content.replace(frontmatter[0], `---\n${updatedFields}\n---`);
-  await putContent(path, content);
-  return { filename, completed, path };
 }
 
 async function esvLookup(reference) {
@@ -799,8 +935,7 @@ async function noteImageAction(path, method, params, formData) {
         const result = await transcribeUploadedImage(file);
         const text = result.notes.map((item) => item.transcription).filter(Boolean).join("\n\n");
         if (!text) throw new Error("No handwritten text could be regenerated from this image.");
-        const title = note.title || note.content.match(/^title:\s*["']?(.+?)["']?\s*$/m)?.[1] || "";
-        content = replaceTranscription(content, filename, addVerseReferences(text, title, note.reference));
+        content = replaceTranscription(content, filename, text);
       }
       content = replaceImageLinks(content, filename, nextName);
       writeStarted = true;
@@ -825,81 +960,6 @@ function decodePath(value) {
   return value.split("/").map((part) => decodeURIComponent(part)).join("/");
 }
 
-async function importNotes(fileList) {
-  const files = [...fileList];
-  const markdownFiles = files.filter((file) => /\.md$/i.test(file.name));
-  const imageFiles = files.filter((file) => file.type.startsWith("image/") || /\.(png|jpe?g|webp|bmp|tiff?|heic|heif)$/i.test(file.name));
-  if (!markdownFiles.length) throw new Error("No Markdown notes were selected.");
-  const user = await currentUser();
-  const localImageMap = new Map();
-  const uploadedStoragePaths = [];
-  const existing = await allNotes();
-  const existingPaths = new Set(existing.map((note) => note.path));
-  const rows = [];
-  let skipped = 0;
-  for (const file of markdownFiles) {
-    const relative = (file.webkitRelativePath || file.name).replace(/\\/g, "/");
-    const parts = relative.split("/");
-    if (parts[0].toLowerCase() === "notes") parts.shift();
-    const path = safePath(parts.join("/"));
-    if (existingPaths.has(path)) {
-      skipped += 1;
-      continue;
-    }
-    rows.push({ path, content: await file.text() });
-    existingPaths.add(path);
-  }
-  if (!rows.length) return { imported: 0, skipped, images: 0 };
-
-  const insertedPaths = [];
-  try {
-    for (const file of imageFiles) {
-      if (file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name} is larger than 25 MB.`);
-      const filename = makeImageName(file);
-      const storagePath = `${user.id}/${filename}`;
-      const { error } = await supabase.storage.from("study-images").upload(storagePath, file, {
-        contentType: imageContentType(file),
-        upsert: false,
-      });
-      if (error) await fail(error, `Could not import ${file.name}`);
-      uploadedStoragePaths.push(storagePath);
-      localImageMap.set(file.name, filename);
-    }
-
-    for (const row of rows) {
-      let content = row.content;
-      content = content.replace(IMAGE_LINK, (whole, alt, destination) => {
-        const match = destination.match(/(?:^|\/)_uploads\/([^/]+)$/);
-        const replacement = match && localImageMap.get(match[1]);
-        return replacement
-          ? `![${alt}](${destination.slice(0, -match[1].length)}${replacement})`
-          : whole;
-      });
-      Object.assign(row, noteFields(row.path, content), { user_id: user.id });
-    }
-    for (let offset = 0; offset < rows.length; offset += 100) {
-      const batch = rows.slice(offset, offset + 100);
-      const { error } = await supabase.from("study_notes").insert(batch);
-      if (error) await fail(error, "Could not import Markdown notes");
-      insertedPaths.push(...batch.map((note) => note.path));
-    }
-  } catch (error) {
-    if (insertedPaths.length) {
-      const { error: rollbackError } = await supabase.from("study_notes").delete().in("path", insertedPaths);
-      if (rollbackError) throw new Error(`${error.message} Also, rollback of partially imported notes failed: ${rollbackError.message}`);
-    }
-    if (uploadedStoragePaths.length) {
-      try {
-        await storageDelete(uploadedStoragePaths);
-      } catch (cleanupError) {
-        throw new Error(`${error.message} Also, cleanup of uploaded images failed: ${cleanupError.message}`);
-      }
-    }
-    throw error;
-  }
-  return { imported: rows.length, skipped, images: localImageMap.size };
-}
-
 export async function apiRequest(url, options = {}) {
   await currentUser();
   const parsed = new URL(url, window.location.origin);
@@ -907,9 +967,15 @@ export async function apiRequest(url, options = {}) {
   const path = parsed.pathname;
   if (path === "/api/folders" && method === "GET") return listFolders();
   if (path === "/api/search/notes" && method === "GET") return searchNotes(parsed.searchParams);
-  if (path === "/api/reading-plan" && method === "GET") return readingPlan();
+  if (path === "/api/book-reading-plans" && method === "GET") return bookReadingPlans(parsed.searchParams.get("date") || undefined);
+  if (path === "/api/book-reading-plans" && method === "POST") return saveBookReadingPlan(JSON.parse(options.body));
   if (path === "/api/tasks" && method === "GET") return taskPlan(parsed.searchParams.get("date") || undefined);
   if (path === "/api/tasks" && method === "POST") return saveTask(JSON.parse(options.body));
+  const bookPlanToggle = path.match(/^\/api\/book-reading-plans\/([0-9a-f-]+)\/toggle$/i);
+  if (bookPlanToggle && method === "POST") return toggleBookReading(bookPlanToggle[1], parsed.searchParams.get("date") || "");
+  const bookPlan = path.match(/^\/api\/book-reading-plans\/([0-9a-f-]+)$/i);
+  if (bookPlan && method === "PUT") return saveBookReadingPlan(JSON.parse(options.body), bookPlan[1]);
+  if (bookPlan && method === "DELETE") return deleteBookReadingPlan(bookPlan[1]);
   const taskToggle = path.match(/^\/api\/tasks\/([0-9a-f-]+)\/toggle$/i);
   if (taskToggle && method === "POST") return toggleTask(taskToggle[1], parsed.searchParams.get("date") || "");
   const task = path.match(/^\/api\/tasks\/([0-9a-f-]+)$/i);
@@ -917,8 +983,6 @@ export async function apiRequest(url, options = {}) {
   if (task && method === "DELETE") return deleteTask(task[1]);
   if (path === "/api/uploads" && method === "POST") return uploadBatch(options.body);
   if (path === "/api/esv" && method === "GET") return esvLookup(parsed.searchParams.get("q") || "");
-  const toggle = path.match(/^\/api\/reading-plan\/([^/]+)\/toggle$/);
-  if (toggle && method === "POST") return toggleReading(decodeURIComponent(toggle[1]));
   const noteImage = path.match(/^\/api\/note-images\/(.+)$/);
   if (noteImage) return noteImageAction(decodePath(noteImage[1]), method, parsed.searchParams, options.body);
   const note = path.match(/^\/api\/note\/(.+)$/);
@@ -948,6 +1012,5 @@ export async function apiRequest(url, options = {}) {
       return { path: notePath, status: "deleted", images_deleted: orphaned.length };
     }
   }
-  if (path === "/api/import-notes" && method === "POST") return importNotes(options.body);
   throw new Error(`Unsupported app request: ${method} ${path}`);
 }

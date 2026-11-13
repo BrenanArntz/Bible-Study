@@ -1,4 +1,4 @@
-import { apiRequest, getImageUrl } from "./data.js";
+import { apiRequest, BIBLE_CHAPTER_COUNTS as bibleChapterCounts, getImageUrl } from "./data.js";
 import { supabase } from "./supabase-client.js";
 
 const state = {
@@ -18,6 +18,7 @@ const state = {
   paneResize: null,
   heightResize: null,
   userId: null,
+  bookPlanOriginal: null,
 };
 
 const elements = {
@@ -58,12 +59,12 @@ const elements = {
   refreshButton: document.querySelector("#refresh-button"),
   todayRefreshButton: document.querySelector("#today-refresh-button"),
   todayDate: document.querySelector("#today-date"),
-  todayEmpty: document.querySelector("#today-empty"),
-  todayUpcoming: document.querySelector("#today-upcoming"),
-  todayReadingList: document.querySelector("#today-reading-list"),
-  progressLabel: document.querySelector("#today-progress-label"),
-  progressPercent: document.querySelector("#today-progress-percent"),
-  progressBar: document.querySelector("#today-progress-bar"),
+  bookPlanTodayEmpty: document.querySelector("#book-plan-today-empty"),
+  bookPlanUpcoming: document.querySelector("#book-plan-upcoming"),
+  bookPlanTodayList: document.querySelector("#book-plan-today-list"),
+  bookPlanProgressLabel: document.querySelector("#book-plan-progress-label"),
+  bookPlanProgressPercent: document.querySelector("#book-plan-progress-percent"),
+  bookPlanProgressBar: document.querySelector("#book-plan-progress-bar"),
   esvForm: document.querySelector("#esv-form"),
   esvQuery: document.querySelector("#esv-query"),
   esvButton: document.querySelector("#esv-button"),
@@ -79,8 +80,6 @@ const elements = {
   authMessage: document.querySelector("#auth-message"),
   signedInEmail: document.querySelector("#signed-in-email"),
   signoutButton: document.querySelector("#signout-button"),
-  importNotesButton: document.querySelector("#import-notes-button"),
-  importNotesInput: document.querySelector("#import-notes-input"),
   taskSettingsButton: document.querySelector("#today-task-settings-button"),
   taskSettings: document.querySelector("#today-task-settings"),
   taskForm: document.querySelector("#today-task-form"),
@@ -93,6 +92,25 @@ const elements = {
   taskSettingsList: document.querySelector("#task-settings-list"),
   todayTaskList: document.querySelector("#today-task-list"),
   todayTasksEmpty: document.querySelector("#today-tasks-empty"),
+  bookPlanSettingsButton: document.querySelector("#book-plan-settings-button"),
+  bookPlanSettings: document.querySelector("#book-plan-settings"),
+  bookPlanForm: document.querySelector("#book-plan-form"),
+  bookPlanEditId: document.querySelector("#book-plan-edit-id"),
+  bookPlanTitle: document.querySelector("#book-plan-title"),
+  bookPlanMode: document.querySelector("#book-plan-mode"),
+  bookPlanBooks: document.querySelector("#book-plan-books"),
+  bookPlanBooksField: document.querySelector("#book-plan-books-field"),
+  bookPlanSelections: document.querySelector("#book-plan-selections"),
+  bookPlanSelectionsField: document.querySelector("#book-plan-selections-field"),
+  bookPlanChapters: document.querySelector("#book-plan-chapters"),
+  bookPlanInterval: document.querySelector("#book-plan-interval"),
+  bookPlanStartDate: document.querySelector("#book-plan-start-date"),
+  bookPlanDate: document.querySelector("#book-plan-date"),
+  bookPlanCancel: document.querySelector("#book-plan-cancel"),
+  bookPlanSaveButton: document.querySelector("#book-plan-save-button"),
+  bookPlanEditWarning: document.querySelector("#book-plan-edit-warning"),
+  bookPlanList: document.querySelector("#book-plan-list"),
+  bookPlansEmpty: document.querySelector("#book-plans-empty"),
 };
 
 elements.authForm.addEventListener("submit", async (event) => {
@@ -143,16 +161,72 @@ const bibleBookNames = [
   "1\\s*Pet\\.?", "2\\s*Pet\\.?", "1\\s*Jn\\.?", "2\\s*Jn\\.?", "3\\s*Jn\\.?",
 ].sort((left, right) => right.length - left.length);
 const bibleReferencePattern = new RegExp(
-  `\\b(${bibleBookNames.join("|")})(?![a-z])\\s+(\\d{1,3}(?:\\s*[,/]\\s*\\d{1,3})?(?:\\s*:\\s*\\d+(?:\\s*[-–]\\s*\\d+)?)?)`,
+  `\\b(${bibleBookNames.join("|")})(?![a-z])\\s+(\\d{1,3}(?:\\s*[,/]\\s*\\d{1,3}(?!\\s*:))?(?:\\s*:\\s*\\d+(?:\\s*[-–]\\s*\\d+)?)?)`,
   "i",
 );
+const bibleBookOnlyPattern = new RegExp(`\\b(${bibleBookNames.join("|")})(?![a-z])`, "i");
+const bibleReferenceMatcher = new RegExp(bibleReferencePattern.source, "gi");
 const bibleBookDisplayNames = new Map([
+  ["gen", "Genesis"],
+  ["exod", "Exodus"],
+  ["ex", "Exodus"],
+  ["lev", "Leviticus"],
+  ["num", "Numbers"],
+  ["deut", "Deuteronomy"],
+  ["josh", "Joshua"],
+  ["judg", "Judges"],
+  ["neh", "Nehemiah"],
+  ["psalm", "Psalms"],
+  ["ps", "Psalms"],
+  ["prov", "Proverbs"],
+  ["eccl", "Ecclesiastes"],
+  ["isa", "Isaiah"],
+  ["is", "Isaiah"],
+  ["jer", "Jeremiah"],
+  ["lam", "Lamentations"],
+  ["ezek", "Ezekiel"],
+  ["dan", "Daniel"],
+  ["hos", "Hosea"],
+  ["mic", "Micah"],
+  ["nah", "Nahum"],
+  ["hab", "Habakkuk"],
+  ["zeph", "Zephaniah"],
+  ["hag", "Haggai"],
+  ["zech", "Zechariah"],
+  ["mat", "Matthew"],
+  ["matt", "Matthew"],
+  ["mk", "Mark"],
+  ["lk", "Luke"],
+  ["rom", "Romans"],
   ["jn", "John"],
   ["john", "John"],
+  ["gal", "Galatians"],
   ["eph", "Ephesians"],
   ["ephesians", "Ephesians"],
+  ["phil", "Philippians"],
+  ["col", "Colossians"],
+  ["heb", "Hebrews"],
+  ["jas", "James"],
+  ["phlm", "Philemon"],
+  ["rev", "Revelation"],
+  ["1 sam", "1 Samuel"],
+  ["2 sam", "2 Samuel"],
+  ["1 kgs", "1 Kings"],
+  ["2 kgs", "2 Kings"],
+  ["1 chr", "1 Chronicles"],
+  ["2 chr", "2 Chronicles"],
+  ["1 cor", "1 Corinthians"],
+  ["2 cor", "2 Corinthians"],
+  ["1 thess", "1 Thessalonians"],
+  ["2 thess", "2 Thessalonians"],
+  ["1 tim", "1 Timothy"],
+  ["2 tim", "2 Timothy"],
+  ["1 pet", "1 Peter"],
+  ["2 pet", "2 Peter"],
+  ["1 jn", "1 John"],
+  ["2 jn", "2 John"],
+  ["3 jn", "3 John"],
 ]);
-
 async function requestJson(url, options = {}) {
   return apiRequest(url, options);
 }
@@ -345,8 +419,18 @@ async function openNote(path) {
 function findBibleReference(text) {
   const match = text.match(bibleReferencePattern);
   if (!match) return "";
-  const book = match[1].replace(/\s+/g, " ").replace(/\./g, "").trim();
-  const displayName = bibleBookDisplayNames.get(book.toLowerCase()) || book;
+  const displayName = normalizeBibleBook(match[1]);
+  const passageMatch = match[2].match(
+    /^(\d{1,3})(?:\s*[,/]\s*(\d{1,3})(?!\s*:))?(?:\s*:\s*(\d+)(?:\s*[-–]\s*(\d+))?)?$/,
+  );
+  const chapterCount = bibleChapterCounts.get(displayName.toLowerCase());
+  if (!passageMatch || !chapterCount) return "";
+  const firstChapter = Number(passageMatch[1]);
+  const lastChapter = Number(passageMatch[2] || passageMatch[1]);
+  if (firstChapter < 1 || lastChapter < firstChapter || lastChapter > chapterCount) return "";
+  const firstVerse = Number(passageMatch[3] || 0);
+  const lastVerse = Number(passageMatch[4] || passageMatch[3] || 0);
+  if (passageMatch[3] && (firstVerse < 1 || lastVerse < firstVerse)) return "";
   const passage = match[2]
     .replace(/\s+/g, " ")
     .replace(/\s*:\s*/g, ":")
@@ -354,6 +438,102 @@ function findBibleReference(text) {
     .replace(/\s*([–-])\s*/g, "$1")
     .trim();
   return `${displayName} ${passage}`;
+}
+
+function normalizeBibleBook(book) {
+  const normalized = book.replace(/\s+/g, " ").replace(/\./g, "").trim();
+  return bibleBookDisplayNames.get(normalized.toLowerCase()) || normalized;
+}
+
+function findBibleBook(text) {
+  const match = text.match(bibleBookOnlyPattern);
+  return match ? normalizeBibleBook(match[1]) : "";
+}
+
+function activeNoteBibleBook() {
+  const reference = state.noteRawContent.match(/^reference:\s*(.+)$/m)?.[1] || "";
+  for (const candidate of [reference, state.noteTitle]) {
+    const passage = findBibleReference(candidate);
+    const book = passage.match(/^(.+?)\s+\d/);
+    if (book) return book[1];
+    const titleBook = findBibleBook(candidate);
+    if (titleBook) return titleBook;
+  }
+  return "";
+}
+
+function findAutomaticReferences(text, noteBook = activeNoteBibleBook()) {
+  const matches = [];
+  for (const match of text.matchAll(new RegExp(bibleReferenceMatcher.source, "gi"))) {
+    const reference = findBibleReference(match[0]);
+    if (!reference) {
+      matches.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        type: "invalid-bible",
+      });
+      continue;
+    }
+    matches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      label: match[0],
+      type: "bible",
+      target: reference,
+    });
+  }
+
+  for (const match of text.matchAll(/(?<![\w:])(\d{1,3}\s*:\s*\d+(?:\s*[-–]\s*\d+)?)(?![\d:])/g)) {
+    matches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      label: match[0],
+      type: "short-bible",
+      target: match[0].replace(/\s+/g, ""),
+    });
+  }
+
+  const identifiers = new Map();
+  for (const note of state.folders.flatMap((folder) => folder.files || [])) {
+    const identifier = String(
+      note.identifier || note.name.match(/(?<![A-Z0-9])[A-Z]\d{3}(?![A-Z0-9])/i)?.[0] || "",
+    ).toUpperCase();
+    if (!/^[A-Z]\d{3}$/.test(identifier)) continue;
+    identifiers.set(identifier, identifiers.has(identifier) ? null : note);
+  }
+  for (const [identifier, note] of identifiers) {
+    if (!note || note.path === state.activeNotePath) continue;
+    const pattern = new RegExp(`(?<![A-Z0-9])(${identifier})(?![A-Z0-9])`, "gi");
+    for (const match of text.matchAll(pattern)) {
+      matches.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        label: match[0],
+        type: "note",
+        target: note.path,
+      });
+    }
+  }
+
+  matches.sort((left, right) => left.start - right.start || right.end - left.end);
+  let cursor = 0;
+  const references = [];
+  for (const match of matches) {
+    if (match.start < cursor) continue;
+    if (match.type === "invalid-bible") {
+      cursor = match.end;
+      continue;
+    }
+    if (match.type === "short-bible") {
+      if (!noteBook) continue;
+      const reference = findBibleReference(`${noteBook} ${match.target}`);
+      if (!reference) continue;
+      match.target = reference;
+    }
+    references.push(match);
+    cursor = match.end;
+  }
+  return references;
 }
 
 function resolveBibleReference(note) {
@@ -830,7 +1010,7 @@ function appendFormattedInline(parent, text) {
   const pattern = /\[\[([^\]]+)\]\]|\*\*([^*]+)\*\*|~~([\s\S]+?)~~|\*([^*\n]+)\*|`([^`\n]+)`|<u>([\s\S]+?)<\/u>|<mark>([\s\S]+?)<\/mark>|<span style="color:\s*(#[0-9a-f]{6});?">([\s\S]+?)<\/span>/gi;
   let cursor = 0;
   for (const match of text.matchAll(pattern)) {
-    parent.append(document.createTextNode(text.slice(cursor, match.index)));
+    appendAutomaticReferences(parent, text.slice(cursor, match.index));
     if (match[1]) {
       const [rawTarget, ...rawLabel] = match[1].split("|");
       const target = rawTarget.trim();
@@ -868,6 +1048,34 @@ function appendFormattedInline(parent, text) {
       parent.append(node);
     }
     cursor = match.index + match[0].length;
+  }
+  appendAutomaticReferences(parent, text.slice(cursor));
+}
+
+function createAutomaticReferenceLink(reference) {
+  const link = document.createElement("span");
+  link.className = "wiki-link";
+  link.contentEditable = "false";
+  link.textContent = reference.label;
+  if (reference.type === "bible" || reference.type === "short-bible") {
+    link.classList.add("bible-link");
+    link.dataset.bibleref = reference.target;
+    link.title = `Look up ${reference.target}`;
+    link.addEventListener("click", () => followWikilink(`bible:${reference.target}`));
+  } else {
+    link.dataset.wikilink = `${reference.target}|${reference.label}`;
+    link.title = `Open note ${reference.label}`;
+    link.addEventListener("click", () => followWikilink(reference.target));
+  }
+  return link;
+}
+
+function appendAutomaticReferences(parent, text) {
+  let cursor = 0;
+  for (const reference of findAutomaticReferences(text)) {
+    parent.append(document.createTextNode(text.slice(cursor, reference.start)));
+    parent.append(createAutomaticReferenceLink(reference));
+    cursor = reference.end;
   }
   parent.append(document.createTextNode(text.slice(cursor)));
 }
@@ -938,6 +1146,51 @@ function renderEditableNote(markdown) {
   }
   flushParagraph();
 }
+
+function linkCompletedReferenceWhileTyping() {
+  const selection = window.getSelection();
+  if (
+    !state.activeNotePath
+    || !selection?.isCollapsed
+    || selection.anchorNode?.nodeType !== Node.TEXT_NODE
+    || !elements.editor.contains(selection.anchorNode)
+  ) {
+    return;
+  }
+  const textNode = selection.anchorNode;
+  if (textNode.parentElement?.closest(".wiki-link")) return;
+  const value = textNode.nodeValue || "";
+  const offset = selection.anchorOffset;
+  const before = value.slice(0, offset);
+  const boundary = before.match(/[\s,;.!?)]*$/)?.[0] || "";
+  if (!boundary) return;
+  const candidate = before.slice(0, before.length - boundary.length);
+  const reference = [...findAutomaticReferences(candidate)]
+    .reverse()
+    .find((item) => item.end === candidate.length);
+  if (!reference) return;
+
+  const parent = textNode.parentNode;
+  if (!parent) return;
+  const fragment = document.createDocumentFragment();
+  const prefix = value.slice(0, reference.start);
+  if (prefix) fragment.append(document.createTextNode(prefix));
+  fragment.append(createAutomaticReferenceLink(reference));
+  const boundaryNode = document.createTextNode(boundary);
+  fragment.append(boundaryNode);
+  const suffix = value.slice(offset);
+  if (suffix) fragment.append(document.createTextNode(suffix));
+  parent.replaceChild(fragment, textNode);
+
+  const caret = document.createRange();
+  caret.setStart(boundaryNode, boundary.length);
+  caret.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(caret);
+  state.editorSelection = caret.cloneRange();
+}
+
+elements.editor.addEventListener("input", linkCompletedReferenceWhileTyping);
 
 function serializeInline(node) {
   if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
@@ -1273,23 +1526,39 @@ function formatDate(value) {
 }
 
 async function loadReadingPlan() {
-  try {
-    const payload = await requestJson("/api/reading-plan");
-    renderTodayReadings(payload.items || []);
-  } catch (error) {
-    elements.todayReadingList.replaceChildren();
-    elements.todayEmpty.hidden = false;
-    elements.todayEmpty.textContent = `Could not load today's reading plan: ${error.message}`;
-    elements.progressLabel.textContent = "Reading plan unavailable";
-    elements.progressPercent.textContent = "—";
-    elements.progressBar.style.width = "0";
-  }
+  const date = new Date(`${localDateKey()}T12:00:00`);
+  elements.todayDate.textContent = new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
   try {
     await loadRecurringTasks();
   } catch (error) {
     elements.todayTaskList.replaceChildren();
     elements.todayTasksEmpty.hidden = false;
     elements.todayTasksEmpty.textContent = `Could not load recurring tasks: ${error.message}`;
+  }
+  await loadBookReadingPlans();
+}
+
+async function loadBookReadingPlans() {
+  const date = elements.bookPlanDate.value || localDateKey();
+  try {
+    const payload = await requestJson(`/api/book-reading-plans?date=${date}`);
+    renderBookReadingPlans(payload.items || [], payload.date || date);
+  } catch (error) {
+    elements.bookPlanList.replaceChildren();
+    elements.bookPlansEmpty.hidden = false;
+    elements.bookPlansEmpty.textContent = `Could not load book reading plans: ${error.message}`;
+    elements.bookPlanTodayList.replaceChildren();
+    elements.bookPlanTodayEmpty.hidden = false;
+    elements.bookPlanTodayEmpty.textContent = `Could not load scheduled readings: ${error.message}`;
+    elements.bookPlanUpcoming.hidden = true;
+    elements.bookPlanProgressLabel.textContent = "Reading plan unavailable";
+    elements.bookPlanProgressPercent.textContent = "—";
+    elements.bookPlanProgressBar.style.width = "0";
   }
 }
 
@@ -1417,62 +1686,197 @@ function localDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function renderTodayReadings(items) {
-  const today = localDateKey();
-  const todayDate = new Date(`${today}T12:00:00`);
-  const todayItems = items.filter((item) => String(item.date).slice(0, 10) === today);
-  const upcoming = items
-    .filter((item) => String(item.date).slice(0, 10) > today)
-    .sort((left, right) => String(left.date).localeCompare(String(right.date)))[0];
+function renderBookReadingPlans(plans, date) {
+  renderBookPlanSettings(plans);
+  const scheduled = plans.filter((plan) => plan.today_reading);
+  const done = scheduled.filter((plan) => plan.today_reading.completed).length;
+  const percent = scheduled.length ? Math.round((done / scheduled.length) * 100) : 0;
+  const dateLabel = date === localDateKey() ? "today" : formatDate(date);
+  elements.bookPlanProgressLabel.textContent = plans.length
+    ? `${done} of ${scheduled.length} readings complete for ${dateLabel}`
+    : "No book reading plans";
+  elements.bookPlanProgressPercent.textContent = `${percent}%`;
+  elements.bookPlanProgressBar.style.width = `${percent}%`;
+  elements.bookPlanTodayList.replaceChildren();
+  elements.bookPlanTodayEmpty.hidden = scheduled.length > 0;
+  elements.bookPlanTodayEmpty.textContent = plans.length
+    ? `No readings scheduled for ${formatDate(date)}.`
+    : "No book reading plans yet. Use Book plan settings to create one.";
 
-  elements.todayDate.textContent = new Intl.DateTimeFormat(undefined, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(todayDate);
-  elements.todayEmpty.hidden = todayItems.length > 0;
-  elements.todayEmpty.textContent = "Nothing planned for today. Your next scheduled reading is shown below, if you have one.";
-  elements.todayUpcoming.hidden = !upcoming || todayItems.length > 0;
-  elements.todayUpcoming.textContent = upcoming
-    ? `Next planned: ${formatDate(upcoming.date)} — ${formatReading(upcoming.reading) || upcoming.filename}`
+  const next = plans
+    .filter((plan) => plan.next_reading)
+    .map((plan) => ({ ...plan.next_reading, title: plan.title }))
+    .sort((left, right) => left.date.localeCompare(right.date))[0];
+  elements.bookPlanUpcoming.hidden = scheduled.length > 0 || !next;
+  elements.bookPlanUpcoming.textContent = next
+    ? `Next planned: ${formatDate(next.date)} · ${next.reference} (${next.title})`
     : "";
-  elements.todayReadingList.replaceChildren();
 
-  todayItems.forEach((reading, index) => {
+  scheduled.forEach((plan) => {
     const row = document.createElement("li");
     row.className = "reading-item";
-    row.classList.toggle("completed", reading.completed);
+    row.classList.toggle("completed", plan.today_reading.completed);
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
-    checkbox.checked = reading.completed;
-    checkbox.id = `reading-${index}`;
-    checkbox.addEventListener("change", () => toggleReading(reading.filename));
+    checkbox.checked = plan.today_reading.completed;
+    checkbox.id = `book-reading-${plan.id}`;
+    checkbox.addEventListener("change", () => toggleBookReadingCompletion(plan.id, date));
     const label = document.createElement("label");
     label.htmlFor = checkbox.id;
-    const date = document.createElement("span");
-    date.className = "reading-date";
-    date.textContent = formatDate(reading.date);
+    const planTitle = document.createElement("span");
+    planTitle.className = "reading-date";
+    planTitle.textContent = plan.title;
     const reference = document.createElement("span");
     reference.className = "reading-reference";
-    reference.textContent = formatReading(reading.reading) || reading.filename;
-    label.append(date, reference);
+    reference.textContent = plan.today_reading.reference;
+    label.append(planTitle, reference);
     row.append(checkbox, label);
-    elements.todayReadingList.append(row);
+    elements.bookPlanTodayList.append(row);
   });
-  updateProgress(todayItems);
 }
 
-function formatReading(reading) {
-  return Array.isArray(reading) ? reading.join(", ") : String(reading || "");
+function renderBookPlanSettings(plans) {
+  elements.bookPlanList.replaceChildren();
+  elements.bookPlansEmpty.hidden = plans.length > 0;
+  elements.bookPlansEmpty.textContent = "No book reading plans yet. Create one to schedule chapters through one or more books.";
+  plans.forEach((plan) => {
+    const row = document.createElement("li");
+    row.className = "book-plan-item";
+    const details = document.createElement("div");
+    details.className = "book-plan-details";
+    const title = document.createElement("h3");
+    title.textContent = plan.title;
+    const schedule = document.createElement("p");
+    schedule.className = "book-plan-schedule";
+    const cadence = plan.interval_days === 1 ? "every day" : `every ${plan.interval_days} days`;
+    schedule.textContent = `${plan.reading_scope} · ${plan.chapters_per_reading} ${plan.chapters_per_reading === 1 ? "chapter" : "chapters"} ${cadence} · Finishes ${formatDate(plan.finish_date)}`;
+    const progress = document.createElement("span");
+    progress.className = "book-plan-progress muted";
+    progress.textContent = `${plan.completed_readings} of ${plan.total_readings} readings complete`;
+    details.append(title, schedule, progress);
+
+    const actions = document.createElement("div");
+    actions.className = "book-plan-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "button button-quiet";
+    edit.textContent = "Edit";
+    edit.addEventListener("click", () => editBookReadingPlan(plan));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "button button-danger";
+    remove.textContent = "Delete";
+    remove.addEventListener("click", () => deleteBookReadingPlan(plan));
+    actions.append(edit, remove);
+    row.append(details, actions);
+    elements.bookPlanList.append(row);
+  });
 }
 
-function updateProgress(items) {
-  const done = items.filter((item) => item.completed).length;
-  const percent = items.length ? Math.round((done / items.length) * 100) : 0;
-  elements.progressLabel.textContent = `${done} of ${items.length} complete`;
-  elements.progressPercent.textContent = `${percent}%`;
-  elements.progressBar.style.width = `${percent}%`;
+function formatSelectedChapters(selections) {
+  const books = [];
+  for (const selection of selections || []) {
+    let group = books.at(-1);
+    if (group?.book !== selection.book) group = null;
+    if (!group) {
+      group = { book: selection.book, ranges: [] };
+      books.push(group);
+    }
+    group.ranges.push(`${selection.start}${selection.start === selection.end ? "" : `-${selection.end}`}`);
+  }
+  return books.map((group) => `${group.book} ${group.ranges.join(", ")}`).join("; ");
+}
+
+function updateBookPlanMode() {
+  const choosingChapters = elements.bookPlanMode.value === "chapters";
+  elements.bookPlanBooksField.hidden = choosingChapters;
+  elements.bookPlanBooks.required = !choosingChapters;
+  elements.bookPlanSelectionsField.hidden = !choosingChapters;
+  elements.bookPlanSelections.required = choosingChapters;
+}
+
+function bookPlanScheduleValues() {
+  return {
+    reading_mode: elements.bookPlanMode.value,
+    books: elements.bookPlanBooks.value.trim(),
+    chapter_selections: elements.bookPlanSelections.value.trim(),
+    chapters_per_reading: Number(elements.bookPlanChapters.value),
+    interval_days: Number(elements.bookPlanInterval.value),
+    start_date: elements.bookPlanStartDate.value,
+  };
+}
+
+function editBookReadingPlan(plan) {
+  elements.bookPlanSettings.hidden = false;
+  elements.bookPlanSettingsButton.setAttribute("aria-expanded", "true");
+  elements.bookPlanEditId.value = plan.id;
+  elements.bookPlanTitle.value = plan.title;
+  elements.bookPlanMode.value = plan.chapter_selections?.length ? "chapters" : "books";
+  elements.bookPlanBooks.value = plan.chapter_selections?.length ? "" : plan.books.join(", ");
+  elements.bookPlanSelections.value = formatSelectedChapters(plan.chapter_selections);
+  elements.bookPlanChapters.value = plan.chapters_per_reading;
+  elements.bookPlanInterval.value = plan.interval_days;
+  elements.bookPlanStartDate.value = plan.start_date;
+  elements.bookPlanSaveButton.textContent = "Save changes";
+  elements.bookPlanEditWarning.hidden = false;
+  updateBookPlanMode();
+  state.bookPlanOriginal = bookPlanScheduleValues();
+  elements.bookPlanTitle.focus();
+}
+
+function resetBookPlanForm() {
+  elements.bookPlanForm.reset();
+  elements.bookPlanEditId.value = "";
+  elements.bookPlanSaveButton.textContent = "Create plan";
+  elements.bookPlanEditWarning.hidden = true;
+  elements.bookPlanStartDate.value = localDateKey();
+  state.bookPlanOriginal = null;
+  updateBookPlanMode();
+}
+
+async function saveBookReadingPlan(event) {
+  event.preventDefault();
+  const id = elements.bookPlanEditId.value;
+  const schedule = bookPlanScheduleValues();
+  const scheduleChanged = id && JSON.stringify(schedule) !== JSON.stringify(state.bookPlanOriginal);
+  if (scheduleChanged && !window.confirm("Changing this plan's passages, pace, or start date will reset its completion history. Continue?")) return;
+  const payload = {
+    title: elements.bookPlanTitle.value,
+    ...schedule,
+  };
+  try {
+    await requestJson(id ? `/api/book-reading-plans/${id}` : "/api/book-reading-plans", {
+      method: id ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    resetBookPlanForm();
+    await loadBookReadingPlans();
+    showToast(id ? "Book reading plan updated." : "Book reading plan created.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function toggleBookReadingCompletion(id, date) {
+  try {
+    await requestJson(`/api/book-reading-plans/${id}/toggle?date=${date}`, { method: "POST" });
+    await loadBookReadingPlans();
+  } catch (error) {
+    showToast(error.message, true);
+    await loadBookReadingPlans();
+  }
+}
+
+async function deleteBookReadingPlan(plan) {
+  if (!window.confirm(`Delete book reading plan “${plan.title}” and its completion history?`)) return;
+  try {
+    await requestJson(`/api/book-reading-plans/${plan.id}`, { method: "DELETE" });
+    await loadBookReadingPlans();
+    showToast("Book reading plan deleted.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
 }
 
 function setActiveView(view) {
@@ -1491,16 +1895,6 @@ function setActiveView(view) {
   });
 }
 
-async function toggleReading(filename) {
-  try {
-    await requestJson(`/api/reading-plan/${encodeURIComponent(filename)}/toggle`, { method: "POST" });
-    await loadReadingPlan();
-  } catch (error) {
-    showToast(error.message, true);
-    await loadReadingPlan();
-  }
-}
-
 async function lookupEsv(event) {
   event.preventDefault();
   const reference = elements.esvQuery.value.trim();
@@ -1510,6 +1904,18 @@ async function lookupEsv(event) {
 
 async function lookupEsvReference(reference) {
   const requestId = ++state.passageRequestId;
+  const normalizedReference = findBibleReference(reference);
+  if (!normalizedReference) {
+    elements.esvButton.disabled = false;
+    elements.esvResult.hidden = false;
+    elements.esvResult.replaceChildren();
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = `Invalid Bible reference: ${reference}.`;
+    elements.esvResult.append(message);
+    return;
+  }
+  reference = normalizedReference;
   elements.esvButton.disabled = true;
   elements.esvResult.hidden = false;
   elements.esvResult.textContent = "Looking up passage…";
@@ -1577,6 +1983,19 @@ elements.saveButton.addEventListener("click", saveNote);
 elements.deleteButton.addEventListener("click", deleteNote);
 elements.refreshButton.addEventListener("click", refreshLibrary);
 elements.todayRefreshButton.addEventListener("click", loadReadingPlan);
+elements.bookPlanDate.value = localDateKey();
+elements.bookPlanStartDate.value = localDateKey();
+elements.bookPlanDate.addEventListener("change", loadBookReadingPlans);
+elements.bookPlanMode.addEventListener("change", updateBookPlanMode);
+updateBookPlanMode();
+elements.bookPlanSettingsButton.addEventListener("click", () => {
+  const open = elements.bookPlanSettings.hidden;
+  elements.bookPlanSettings.hidden = !open;
+  elements.bookPlanSettingsButton.setAttribute("aria-expanded", String(open));
+  if (open) elements.bookPlanTitle.focus();
+});
+elements.bookPlanForm.addEventListener("submit", saveBookReadingPlan);
+elements.bookPlanCancel.addEventListener("click", resetBookPlanForm);
 elements.taskSettingsButton.addEventListener("click", () => {
   const open = elements.taskSettings.hidden;
   elements.taskSettings.hidden = !open;
@@ -1676,29 +2095,6 @@ elements.esvForm.addEventListener("submit", lookupEsv);
 elements.noteSearchForm.addEventListener("submit", searchNotes);
 
 setActiveView(window.location.hash === "#today" ? "today" : "library");
-
-elements.importNotesButton.addEventListener("click", () => elements.importNotesInput.click());
-elements.importNotesInput.addEventListener("change", async () => {
-  const files = elements.importNotesInput.files;
-  if (!files?.length) return;
-  if (!window.confirm(`Copy ${files.length} selected files into this Supabase account? Existing notes with the same path will be skipped.`)) {
-    elements.importNotesInput.value = "";
-    return;
-  }
-  elements.importNotesButton.disabled = true;
-  elements.importNotesButton.textContent = "Importing…";
-  try {
-    const result = await apiRequest("/api/import-notes", { method: "POST", body: files });
-    showToast(`Imported ${result.imported} note(s), ${result.images} image(s); skipped ${result.skipped} existing note(s).`);
-    await Promise.all([loadVault(), loadReadingPlan()]);
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    elements.importNotesInput.value = "";
-    elements.importNotesButton.disabled = false;
-    elements.importNotesButton.textContent = "Import local notes";
-  }
-});
 
 async function showSession(session) {
   const authenticated = Boolean(session?.user);
