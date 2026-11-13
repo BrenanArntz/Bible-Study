@@ -369,12 +369,11 @@ function makeTitle(identifier, title, reference, fallback) {
 }
 
 function addVerseReferences(markdown, title, reference) {
-  const passage = [reference, title]
-    .map((value) => String(value || "").match(bibleReferencePattern))
-    .find(Boolean);
+  const passagePattern = /\b(Ephesians|Eph\.?)[\s]+(\d{1,3})(?:\s*[,/&]\s*(\d{1,3}))*/i;
+  const passage = [reference, title].map((value) => String(value || "").match(passagePattern)).find(Boolean);
   if (!passage) return markdown;
 
-  const book = passage[1];
+  const book = "Ephesians";
   let chapter = Number(passage[2]);
   const chapterHeading = new RegExp(
     `^\\s*(?:#{1,6}\\s*)?${book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(\\d{1,3})\\s*:?\\s*$`,
