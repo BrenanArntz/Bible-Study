@@ -186,8 +186,20 @@ create table if not exists public.study_reading_plan_completions (
 create index if not exists study_reading_plan_completions_date_idx
     on public.study_reading_plan_completions (scheduled_date, plan_id);
 
+create table if not exists public.study_chapter_readings (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+    read_date date not null default current_date,
+    chapter_selections jsonb not null check (jsonb_typeof(chapter_selections) = 'array'),
+    created_at timestamptz not null default now()
+);
+
+create index if not exists study_chapter_readings_user_date_idx
+    on public.study_chapter_readings (user_id, read_date);
+
 alter table public.study_reading_plans enable row level security;
 alter table public.study_reading_plan_completions enable row level security;
+alter table public.study_chapter_readings enable row level security;
 
 drop policy if exists "Users manage their own book reading plans" on public.study_reading_plans;
 create policy "Users manage their own book reading plans" on public.study_reading_plans
@@ -212,8 +224,14 @@ create policy "Users manage their own book reading completions" on public.study_
         )
     );
 
+drop policy if exists "Users manage their own chapter readings" on public.study_chapter_readings;
+create policy "Users manage their own chapter readings" on public.study_chapter_readings
+    for all to authenticated using ((select auth.uid()) = user_id)
+    with check ((select auth.uid()) = user_id);
+
 grant select, insert, update, delete on public.study_reading_plans to authenticated;
 grant select, insert, update, delete on public.study_reading_plan_completions to authenticated;
+grant select, insert, update, delete on public.study_chapter_readings to authenticated;
 
 create or replace function public.clear_book_reading_plan_completions_on_schedule_change()
 returns trigger

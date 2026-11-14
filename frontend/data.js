@@ -1,5 +1,6 @@
 import { supabase } from "./supabase-client.js";
 
+// --- Shared note, image, and Scripture reference configuration ---
 const NOTE_CATEGORIES = ["exegesis", "topics", "church-history"];
 const FOLDER_NAMES = {
   exegesis: "Exegesis",
@@ -28,6 +29,7 @@ export const BIBLE_CHAPTER_COUNTS = new Map([
   ["2 john", 1], ["3 john", 1], ["jude", 1], ["revelation", 22],
 ]);
 
+// --- Authentication, note paths, frontmatter, and core note storage ---
 function fail(error, prefix = "Supabase request failed") {
   if (error?.context?.json) {
     return error.context.json().then((payload) => {
@@ -198,6 +200,7 @@ async function storageDelete(paths) {
   if (error) return fail(error, "Could not remove image from storage");
 }
 
+// --- Image upload, transcription, and uploaded-note creation ---
 function makeImageName(file) {
   const suffix = file.name.match(/\.[a-z0-9]{1,8}$/i)?.[0].toLowerCase() || ".jpg";
   return `${crypto.randomUUID()}${suffix}`;
@@ -507,6 +510,7 @@ async function uploadBatch(formData) {
   return { items };
 }
 
+// --- Library folder contents and note search ---
 async function listFolders() {
   const notes = await allNotes();
   return {
@@ -571,6 +575,7 @@ function searchNotes(params) {
   });
 }
 
+// --- Reading plan validation, chapter parsing, and calendar helpers ---
 const TASK_TYPES = ["personal-reading", "reading-with-haley", "verse-quiz", "greek", "church-history", "other"];
 const UUID_PATTERN = /^[0-9a-f-]{36}$/i;
 
@@ -588,6 +593,13 @@ function dateFromDayNumber(dayNumber) {
   return new Date(dayNumber * 86400000).toISOString().slice(0, 10);
 }
 
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function canonicalBookName(value) {
   const canonical = [...BIBLE_CHAPTER_COUNTS.keys()].find((name) => name.toLowerCase() === value.trim().toLowerCase());
   if (!canonical) throw new Error(`Unknown Bible book: ${value}. Use full book names.`);
@@ -600,12 +612,12 @@ function normalizeChapterSelections(value) {
   const selections = [];
   const selectedChapters = new Set();
   for (const group of groups) {
-    const match = group.match(/^(.+?)\s+(\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*)$/);
+    const match = group.match(/^(.+?)\s+(\d+(?:\s*[-–—]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–—]\s*\d+)?)*)$/);
     if (!match) throw new Error(`Could not read chapter selection: ${group}. Separate books with semicolons.`);
     const book = canonicalBookName(match[1]);
     const chapterCount = BIBLE_CHAPTER_COUNTS.get(book.toLowerCase());
     for (const selection of match[2].split(",")) {
-      const range = selection.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+      const range = selection.trim().match(/^(\d+)(?:\s*[-–—]\s*(\d+))?$/);
       const start = Number(range[1]);
       const end = Number(range[2] || start);
       if (start < 1 || end < start || end > chapterCount) {
@@ -646,34 +658,45 @@ function formatChapterSelections(selections) {
 }
 
 function readingForOffset(plan, offset) {
-  const firstChapter = offset * plan.chapters_per_reading + 1;
-  if (firstChapter > plan.total_chapters) return null;
-  const lastChapter = Math.min(plan.total_chapters, firstChapter + plan.chapters_per_reading - 1);
-  let chapterOffset = 0;
+  const chapters = chaptersForOffset(plan, offset);
+  if (!chapters.length) return null;
   const passages = [];
-  for (const segment of chapterSegments(plan)) {
-    const segmentLength = segment.end - segment.start + 1;
-    const segmentEnd = chapterOffset + segmentLength;
-    const overlapStart = Math.max(firstChapter, chapterOffset + 1);
-    const overlapEnd = Math.min(lastChapter, segmentEnd);
-    if (overlapStart <= overlapEnd) {
-      const start = segment.start + overlapStart - chapterOffset - 1;
-      const end = segment.start + overlapEnd - chapterOffset - 1;
-      const previous = passages.at(-1);
-      if (previous && previous.book === segment.book && previous.end + 1 === start) {
-        previous.end = end;
-      } else {
-        passages.push({ book: segment.book, start, end });
-      }
+  for (const chapter of chapters) {
+    const previous = passages.at(-1);
+    if (previous && previous.book === chapter.book && previous.end + 1 === chapter.chapter) {
+      previous.end = chapter.chapter;
+    } else {
+      passages.push({ book: chapter.book, start: chapter.chapter, end: chapter.chapter });
     }
-    chapterOffset = segmentEnd;
-    if (chapterOffset >= lastChapter) break;
   }
   return formatChapterSelections(passages);
 }
 
+function chaptersForOffset(plan, offset) {
+  const firstChapterOffset = offset * plan.chapters_per_reading;
+  if (!Number.isInteger(offset) || offset < 0 || firstChapterOffset >= plan.total_chapters) return [];
+  const endChapterOffset = Math.min(
+    plan.total_chapters,
+    firstChapterOffset + plan.chapters_per_reading,
+  );
+  const chapters = [];
+  let chapterOffset = 0;
+  for (const segment of chapterSegments(plan)) {
+    const segmentLength = segment.end - segment.start + 1;
+    const overlapStart = Math.max(firstChapterOffset, chapterOffset);
+    const overlapEnd = Math.min(endChapterOffset, chapterOffset + segmentLength);
+    for (let index = overlapStart; index < overlapEnd; index += 1) {
+      const bookKey = segment.book.toLowerCase() === "song of songs" ? "song of solomon" : segment.book.toLowerCase();
+      chapters.push({ book: segment.book, book_key: bookKey, chapter: segment.start + index - chapterOffset });
+    }
+    chapterOffset += segmentLength;
+    if (chapterOffset >= endChapterOffset) break;
+  }
+  return chapters;
+}
+
 function normalizeReadingPlan(payload) {
-  const title = String(payload.title || "").trim();
+  const requestedTitle = String(payload.title || "").trim();
   const chapterSelections = payload.reading_mode === "chapters" ? normalizeChapterSelections(payload.chapter_selections) : null;
   const books = chapterSelections
     ? [...new Set(chapterSelections.map((selection) => selection.book))]
@@ -683,12 +706,16 @@ function normalizeReadingPlan(payload) {
         .filter(Boolean)
         .map(canonicalBookName),
     )];
+  const bookTitle = books.join(" + ");
+  const title = requestedTitle || (bookTitle.length <= 120
+    ? bookTitle
+    : `${books[0]} + ${books.length - 1} more books`);
   const chaptersPerReading = Number(payload.chapters_per_reading);
   const intervalDays = Number(payload.interval_days);
   const startDate = String(payload.start_date || "");
   if (!title || title.length > 120 || !books.length || !Number.isInteger(chaptersPerReading) || chaptersPerReading < 1 || chaptersPerReading > 50
     || !Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 365 || !validDateKey(startDate)) {
-    throw new Error("Enter a plan name, one or more books, a valid chapter amount, interval, and start date.");
+    throw new Error("Choose one or more books, a valid chapter amount, interval, and start date.");
   }
   return {
     title,
@@ -700,6 +727,7 @@ function normalizeReadingPlan(payload) {
   };
 }
 
+// --- Book plans, overdue readings, completions, and reading statistics ---
 async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
   if (!validDateKey(date)) throw new Error("Use a valid reading plan date.");
   const [{ data: plans, error: planError }, { data: completions, error: completionError }] = await Promise.all([
@@ -719,6 +747,54 @@ async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
   }));
   const completedByPlan = new Map(completedCounts);
   const completedToday = new Set((completions || []).map((completion) => completion.plan_id));
+  const today = localDateKey();
+  const currentDayNumber = dateDayNumber(today);
+  const dailyPlans = (plans || []).filter((plan) => plan.interval_days === 1);
+  const overdueCompletions = [];
+  if (dailyPlans.length) {
+    const earliestStart = dailyPlans.reduce(
+      (earliest, plan) => plan.start_date < earliest ? plan.start_date : earliest,
+      dailyPlans[0].start_date,
+    );
+    const dailyPlanIds = dailyPlans.map((plan) => plan.id);
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabase.from("study_reading_plan_completions")
+        .select("plan_id,scheduled_date")
+        .in("plan_id", dailyPlanIds)
+        .gte("scheduled_date", earliestStart)
+        .lt("scheduled_date", today)
+        .order("plan_id")
+        .order("scheduled_date")
+        .range(offset, offset + pageSize - 1);
+      if (error) return fail(error, "Could not load overdue book readings");
+      overdueCompletions.push(...(data || []));
+      if ((data || []).length < pageSize) break;
+    }
+  }
+  const completedOverdue = new Set(
+    overdueCompletions.map((completion) => `${completion.plan_id}:${completion.scheduled_date}`),
+  );
+  const overdueReadings = [];
+  for (const plan of dailyPlans) {
+    const totalChapters = totalChapterCount(plan);
+    const totalReadings = Math.ceil(totalChapters / plan.chapters_per_reading);
+    const planStart = dateDayNumber(plan.start_date);
+    const overdueCount = Math.min(totalReadings, Math.max(0, currentDayNumber - planStart));
+    for (let index = 0; index < overdueCount; index += 1) {
+      const scheduledDate = dateFromDayNumber(planStart + index);
+      if (completedOverdue.has(`${plan.id}:${scheduledDate}`)) continue;
+      const reference = readingForOffset({ ...plan, total_chapters: totalChapters }, index);
+      if (!reference) continue;
+      overdueReadings.push({
+        plan_id: plan.id,
+        title: plan.title,
+        scheduled_date: scheduledDate,
+        reference,
+      });
+    }
+  }
+  overdueReadings.sort((left, right) => left.scheduled_date.localeCompare(right.scheduled_date));
   const todayNumber = dateDayNumber(date);
   const items = (plans || []).map((plan) => {
     const totalChapters = totalChapterCount(plan);
@@ -743,7 +819,152 @@ async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
       next_reading: nextReading ? { date: nextDate, reference: nextReading } : null,
     };
   });
-  return { items, date };
+  const completedItems = items.filter((plan) => plan.completed_readings >= plan.total_readings);
+  return {
+    items: items.filter((plan) => plan.completed_readings < plan.total_readings),
+    completed_items: completedItems,
+    date,
+    overdue_readings: overdueReadings,
+  };
+}
+
+async function readingStatistics() {
+  const [
+    { data: plans, error: planError },
+    { count: noteCount, error: noteError },
+  ] = await Promise.all([
+    supabase.from("study_reading_plans")
+      .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date"),
+    supabase.from("study_notes")
+      .select("id", { count: "exact", head: true })
+      .in("category", NOTE_CATEGORIES),
+  ]);
+  if (planError) return fail(planError, "Could not load reading statistics");
+  if (noteError) return fail(noteError, "Could not count study notes");
+
+  const completions = [];
+  const manualReadings = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase.from("study_reading_plan_completions")
+      .select("plan_id,scheduled_date,completed_at")
+      .order("plan_id")
+      .order("scheduled_date")
+      .range(offset, offset + pageSize - 1);
+    if (error) return fail(error, "Could not load completed reading history");
+    completions.push(...(data || []));
+    if ((data || []).length < pageSize) break;
+  }
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase.from("study_chapter_readings")
+      .select("read_date,chapter_selections")
+      .order("read_date")
+      .range(offset, offset + pageSize - 1);
+    if (error) return fail(error, "Could not load manually logged chapter readings");
+    manualReadings.push(...(data || []));
+    if ((data || []).length < pageSize) break;
+  }
+
+  const books = [...BIBLE_CHAPTER_COUNTS.entries()]
+    .filter(([book]) => book !== "song of songs")
+    .map(([key, chapterCount], index) => ({
+      key,
+      name: canonicalBookName(key),
+      testament: index < 39 ? "Old Testament" : "New Testament",
+      total_chapters: chapterCount,
+      chapters: Array.from({ length: chapterCount }, (_, chapter) => ({ chapter: chapter + 1, reads: 0 })),
+    }));
+  const booksByKey = new Map(books.map((book) => [book.key, book]));
+  const plansById = new Map((plans || []).map((plan) => [plan.id, plan]));
+  const readingDays = new Set();
+  let totalChapterReads = 0;
+
+  for (const completion of completions) {
+    const plan = plansById.get(completion.plan_id);
+    if (!plan) throw new Error("A completed reading could not be matched to its reading plan.");
+    const completedAt = new Date(completion.completed_at);
+    if (!validDateKey(completion.scheduled_date) || !validDateKey(plan.start_date)
+      || !Number.isFinite(completedAt.getTime())) {
+      throw new Error("A completed reading contains an invalid date.");
+    }
+    const totalChapters = totalChapterCount(plan);
+    const daysSinceStart = dateDayNumber(completion.scheduled_date) - dateDayNumber(plan.start_date);
+    const offset = daysSinceStart / plan.interval_days;
+    if (daysSinceStart < 0 || !Number.isInteger(offset)) {
+      throw new Error("A completed reading does not match its plan schedule.");
+    }
+    const chapters = chaptersForOffset({ ...plan, total_chapters: totalChapters }, offset);
+    if (!chapters.length) throw new Error("A completed reading has no chapters in its plan.");
+    for (const chapter of chapters) {
+      const book = booksByKey.get(chapter.book_key);
+      if (!book || !book.chapters[chapter.chapter - 1]) {
+        throw new Error("A completed reading contains an unknown Bible chapter.");
+      }
+      book.chapters[chapter.chapter - 1].reads += 1;
+      totalChapterReads += 1;
+    }
+    readingDays.add(localDateKey(completedAt));
+  }
+
+  for (const reading of manualReadings) {
+    if (!validDateKey(reading.read_date)) throw new Error("A manually logged reading contains an invalid date.");
+    const selections = normalizeChapterSelections(formatChapterSelections(reading.chapter_selections));
+    for (const selection of selections) {
+      const bookKey = selection.book.toLowerCase() === "song of songs" ? "song of solomon" : selection.book.toLowerCase();
+      const book = booksByKey.get(bookKey);
+      if (!book) throw new Error("A manually logged reading contains an unknown Bible book.");
+      for (let chapterNumber = selection.start; chapterNumber <= selection.end; chapterNumber += 1) {
+        const chapter = book.chapters[chapterNumber - 1];
+        if (!chapter) throw new Error("A manually logged reading contains an unknown Bible chapter.");
+        chapter.reads += 1;
+        totalChapterReads += 1;
+      }
+    }
+    readingDays.add(reading.read_date);
+  }
+
+  const bookStats = books.map((book) => {
+    const uniqueChaptersRead = book.chapters.filter((chapter) => chapter.reads > 0).length;
+    const chapterReads = book.chapters.reduce((total, chapter) => total + chapter.reads, 0);
+    return {
+      ...book,
+      unique_chapters_read: uniqueChaptersRead,
+      chapter_reads: chapterReads,
+      completed: uniqueChaptersRead === book.total_chapters,
+    };
+  });
+  const totalBibleChapters = bookStats.reduce((total, book) => total + book.total_chapters, 0);
+  const uniqueChaptersRead = bookStats.reduce((total, book) => total + book.unique_chapters_read, 0);
+  const bibleReadThroughs = Math.min(...bookStats.flatMap((book) => book.chapters.map((chapter) => chapter.reads)));
+  const todayNumber = dateDayNumber(localDateKey());
+  let streakDayNumber = todayNumber - (readingDays.has(dateFromDayNumber(todayNumber)) ? 0 : 1);
+  let readingStreak = 0;
+  while (readingDays.has(dateFromDayNumber(streakDayNumber))) {
+    readingStreak += 1;
+    streakDayNumber -= 1;
+  }
+  const testamentStats = ["Old Testament", "New Testament"].map((testament) => {
+    const testamentBooks = bookStats.filter((book) => book.testament === testament);
+    return {
+      name: testament,
+      unique_chapters_read: testamentBooks.reduce((total, book) => total + book.unique_chapters_read, 0),
+      total_chapters: testamentBooks.reduce((total, book) => total + book.total_chapters, 0),
+    };
+  });
+
+  return {
+    note_count: noteCount || 0,
+    completed_readings: completions.length + manualReadings.length,
+    reading_days: readingDays.size,
+    reading_streak: readingStreak,
+    chapter_reads: totalChapterReads,
+    unique_chapters_read: uniqueChaptersRead,
+    total_chapters: totalBibleChapters,
+    bible_read_throughs: bibleReadThroughs,
+    completed_books: bookStats.filter((book) => book.completed).length,
+    testaments: testamentStats,
+    books: bookStats,
+  };
 }
 
 async function saveBookReadingPlan(payload, id = "") {
@@ -792,6 +1013,25 @@ async function toggleBookReading(planId, date) {
   return { completed: !existing };
 }
 
+async function saveChapterReading(payload) {
+  const selections = normalizeChapterSelections(payload.chapter_selections);
+  const user = await currentUser();
+  const { data, error } = await supabase.from("study_chapter_readings")
+    .insert({
+      user_id: user.id,
+      read_date: localDateKey(),
+      chapter_selections: selections,
+    })
+    .select("id")
+    .single();
+  if (error) return fail(error, "Could not save your chapter reading");
+  return {
+    id: data.id,
+    reference: formatChapterSelections(selections),
+    chapter_count: selections.reduce((total, selection) => total + selection.end - selection.start + 1, 0),
+  };
+}
+
 async function deleteBookReadingPlan(id) {
   if (!UUID_PATTERN.test(id)) throw new Error("Invalid book reading plan.");
   const { data, error } = await supabase.from("study_reading_plans").delete().eq("id", id).select("id");
@@ -800,6 +1040,7 @@ async function deleteBookReadingPlan(id) {
   return { status: "deleted" };
 }
 
+// --- Recurring task schedules, completions, and ESV lookup ---
 async function taskPlan(date = new Date().toISOString().slice(0, 10)) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Use a valid task date.");
   const user = await currentUser();
@@ -863,6 +1104,7 @@ async function esvLookup(reference) {
   return data;
 }
 
+// --- Note image operations and transcription replacement ---
 async function addImage(path, file) {
   const note = await noteByPath(path);
   const { filename, storagePath } = await uploadImage(file);
@@ -956,6 +1198,7 @@ async function noteImageAction(path, method, params, formData) {
   throw new Error("Unsupported image action.");
 }
 
+// --- API request routing for the browser app ---
 function decodePath(value) {
   return value.split("/").map((part) => decodeURIComponent(part)).join("/");
 }
@@ -969,6 +1212,8 @@ export async function apiRequest(url, options = {}) {
   if (path === "/api/search/notes" && method === "GET") return searchNotes(parsed.searchParams);
   if (path === "/api/book-reading-plans" && method === "GET") return bookReadingPlans(parsed.searchParams.get("date") || undefined);
   if (path === "/api/book-reading-plans" && method === "POST") return saveBookReadingPlan(JSON.parse(options.body));
+  if (path === "/api/chapter-readings" && method === "POST") return saveChapterReading(JSON.parse(options.body));
+  if (path === "/api/reading-statistics" && method === "GET") return readingStatistics();
   if (path === "/api/tasks" && method === "GET") return taskPlan(parsed.searchParams.get("date") || undefined);
   if (path === "/api/tasks" && method === "POST") return saveTask(JSON.parse(options.body));
   const bookPlanToggle = path.match(/^\/api\/book-reading-plans\/([0-9a-f-]+)\/toggle$/i);

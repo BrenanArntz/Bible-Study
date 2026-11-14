@@ -1,6 +1,7 @@
 import { apiRequest, BIBLE_CHAPTER_COUNTS as bibleChapterCounts, getImageUrl } from "./data.js";
 import { supabase } from "./supabase-client.js";
 
+// --- Application state, DOM bindings, and shared reference data ---
 const state = {
   folders: [],
   activeFolder: null,
@@ -19,6 +20,7 @@ const state = {
   heightResize: null,
   userId: null,
   bookPlanOriginal: null,
+  selectedBookPlanBooks: [],
 };
 
 const elements = {
@@ -26,6 +28,12 @@ const elements = {
   appShell: document.querySelector(".app-shell"),
   libraryView: document.querySelector("#library-view"),
   todayView: document.querySelector("#today-view"),
+  statsView: document.querySelector("#stats-view"),
+  statsRefreshButton: document.querySelector("#stats-refresh-button"),
+  statsStatus: document.querySelector("#stats-status"),
+  statsSummary: document.querySelector("#stats-summary"),
+  statsTestamentProgress: document.querySelector("#stats-testament-progress"),
+  statsBookList: document.querySelector("#stats-book-list"),
   folderGrid: document.querySelector("#folder-grid"),
   libraryCount: document.querySelector("#library-count"),
   noteBrowser: document.querySelector("#note-browser"),
@@ -63,6 +71,11 @@ const elements = {
   bookPlanTodayEmpty: document.querySelector("#book-plan-today-empty"),
   bookPlanUpcoming: document.querySelector("#book-plan-upcoming"),
   bookPlanTodayList: document.querySelector("#book-plan-today-list"),
+  bookPlanOverdueSection: document.querySelector("#book-plan-overdue-section"),
+  bookPlanOverdueList: document.querySelector("#book-plan-overdue-list"),
+  quickReadingForm: document.querySelector("#quick-reading-form"),
+  quickReadingSelections: document.querySelector("#quick-reading-selections"),
+  quickReadingSaveButton: document.querySelector("#quick-reading-save-button"),
   bookPlanProgressLabel: document.querySelector("#book-plan-progress-label"),
   bookPlanProgressPercent: document.querySelector("#book-plan-progress-percent"),
   bookPlanProgressBar: document.querySelector("#book-plan-progress-bar"),
@@ -101,6 +114,9 @@ const elements = {
   bookPlanMode: document.querySelector("#book-plan-mode"),
   bookPlanBooks: document.querySelector("#book-plan-books"),
   bookPlanBooksField: document.querySelector("#book-plan-books-field"),
+  bookPlanBookSelect: document.querySelector("#book-plan-book-select"),
+  bookPlanAddBookButton: document.querySelector("#book-plan-add-book-button"),
+  bookPlanSelectedBooks: document.querySelector("#book-plan-selected-books"),
   bookPlanSelections: document.querySelector("#book-plan-selections"),
   bookPlanSelectionsField: document.querySelector("#book-plan-selections-field"),
   bookPlanChapters: document.querySelector("#book-plan-chapters"),
@@ -112,6 +128,9 @@ const elements = {
   bookPlanEditWarning: document.querySelector("#book-plan-edit-warning"),
   bookPlanList: document.querySelector("#book-plan-list"),
   bookPlansEmpty: document.querySelector("#book-plans-empty"),
+  completedPlansCount: document.querySelector("#completed-plans-count"),
+  completedPlansEmpty: document.querySelector("#completed-plans-empty"),
+  completedPlansList: document.querySelector("#completed-plans-list"),
 };
 
 elements.authForm.addEventListener("submit", async (event) => {
@@ -228,6 +247,7 @@ const bibleBookDisplayNames = new Map([
   ["2 jn", "2 John"],
   ["3 jn", "3 John"],
 ]);
+// --- Shared notifications, folder browser, and library loading ---
 async function requestJson(url, options = {}) {
   return apiRequest(url, options);
 }
@@ -417,6 +437,7 @@ async function openNote(path) {
   }
 }
 
+// --- Bible reference matching and cross-reference navigation ---
 function findBibleReference(text) {
   const match = text.match(bibleReferencePattern);
   if (!match) return "";
@@ -546,6 +567,7 @@ function resolveBibleReference(note) {
   return "";
 }
 
+// --- Passage panel and resizable editor panes ---
 function setPassagePanelVisible(visible) {
   elements.passagePanel.hidden = !visible;
   elements.paneResizer.hidden = !visible;
@@ -701,6 +723,7 @@ for (const [handle, target] of [
   handle.addEventListener("keydown", (event) => handleHeightResizeKey(event, target));
 }
 
+// --- Note search and search-result actions ---
 async function searchNotes(event) {
   event.preventDefault();
   const formData = new FormData(elements.noteSearchForm);
@@ -769,6 +792,7 @@ function encodePath(path) {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
+// --- Rich-text editor selection and formatting commands ---
 function rememberEditorSelection() {
   const selection = window.getSelection();
   if (
@@ -940,6 +964,7 @@ function applyEditorList(tagName) {
   }
 }
 
+// --- Markdown parsing, rendering, and editor serialization ---
 function extractNoteAttachments(content) {
   const attachments = new Map();
   const pattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -1241,6 +1266,7 @@ function serializeEditableNote() {
     .trim();
 }
 
+// --- Note image attachments: display, upload, replacement, and removal ---
 async function renderPhotos() {
   const path = state.activeNotePath;
   const items = await Promise.all(state.noteAttachments.map(async (attachment) => {
@@ -1372,6 +1398,7 @@ elements.noteImageInput.addEventListener("change", () => {
   }
 });
 
+// --- Note links, saving, and deletion ---
 function updateFrontmatterTitle(frontmatter, title) {
   const titleField = `title: ${JSON.stringify(title)}`;
   if (/^title\s*:/m.test(frontmatter)) {
@@ -1518,6 +1545,7 @@ async function deleteNote() {
   }
 }
 
+// --- Today view: dates, schedules, and recurring tasks ---
 function formatDate(value) {
   if (!value) return "No date";
   const date = new Date(`${value}T00:00:00`);
@@ -1558,8 +1586,15 @@ async function loadReadingPlan() {
 async function loadBookReadingPlans(dateValue = getSelectedScheduleDate()) {
   try {
     const payload = await requestJson(`/api/book-reading-plans?date=${dateValue}`);
-    renderBookReadingPlans(payload.items || [], payload.date || dateValue);
+    renderCompletedReadingPlans(payload.completed_items || []);
+    renderBookReadingPlans(
+      payload.items || [],
+      payload.date || dateValue,
+      payload.overdue_readings || [],
+      payload.completed_items || [],
+    );
   } catch (error) {
+    renderCompletedReadingPlans([], `Could not load completed reading plans: ${error.message}`);
     elements.bookPlanList.replaceChildren();
     elements.bookPlansEmpty.hidden = false;
     elements.bookPlansEmpty.textContent = `Could not load book reading plans: ${error.message}`;
@@ -1567,6 +1602,8 @@ async function loadBookReadingPlans(dateValue = getSelectedScheduleDate()) {
     elements.bookPlanTodayEmpty.hidden = false;
     elements.bookPlanTodayEmpty.textContent = `Could not load scheduled readings: ${error.message}`;
     elements.bookPlanUpcoming.hidden = true;
+    elements.bookPlanOverdueSection.hidden = true;
+    elements.bookPlanOverdueList.replaceChildren();
     elements.bookPlanProgressLabel.textContent = "Reading plan unavailable";
     elements.bookPlanProgressPercent.textContent = "—";
     elements.bookPlanProgressBar.style.width = "0";
@@ -1690,6 +1727,7 @@ async function saveRecurringTask(event) {
   } catch (error) { showToast(error.message, true); }
 }
 
+// --- Book-plan editing, selected books, and reading checklists ---
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -1697,7 +1735,31 @@ function localDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function renderBookReadingPlans(plans, date) {
+function appendBookReadingItem(list, plan, reading, date, overdue = false) {
+  const row = document.createElement("li");
+  row.className = "reading-item";
+  row.classList.toggle("completed", reading.completed);
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = reading.completed;
+  checkbox.id = overdue
+    ? `book-reading-overdue-${plan.id}-${date}`
+    : `book-reading-${plan.id}`;
+  checkbox.addEventListener("change", () => toggleBookReadingCompletion(plan.id, date));
+  const label = document.createElement("label");
+  label.htmlFor = checkbox.id;
+  const planTitle = document.createElement("span");
+  planTitle.className = "reading-date";
+  planTitle.textContent = overdue ? `Overdue · ${formatDate(date)} · ${plan.title}` : plan.title;
+  const reference = document.createElement("span");
+  reference.className = "reading-reference";
+  reference.textContent = reading.reference;
+  label.append(planTitle, reference);
+  row.append(checkbox, label);
+  list.append(row);
+}
+
+function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlans = []) {
   renderBookPlanSettings(plans);
   const scheduled = plans.filter((plan) => plan.today_reading);
   const done = scheduled.filter((plan) => plan.today_reading.completed).length;
@@ -1705,14 +1767,16 @@ function renderBookReadingPlans(plans, date) {
   const dateLabel = date === localDateKey() ? "today" : formatDate(date);
   elements.bookPlanProgressLabel.textContent = plans.length
     ? `${done} of ${scheduled.length} readings complete for ${dateLabel}`
-    : "No book reading plans";
+    : completedPlans.length ? "All book reading plans complete" : "No book reading plans";
   elements.bookPlanProgressPercent.textContent = `${percent}%`;
   elements.bookPlanProgressBar.style.width = `${percent}%`;
   elements.bookPlanTodayList.replaceChildren();
   elements.bookPlanTodayEmpty.hidden = scheduled.length > 0;
   elements.bookPlanTodayEmpty.textContent = plans.length
     ? `No readings scheduled for ${formatDate(date)}.`
-    : "No book reading plans yet. Use Book plan settings to create one.";
+    : completedPlans.length
+      ? "All book reading plans are complete. View them in the Library."
+      : "No book reading plans yet. Use Book plan settings to create one.";
 
   const next = plans
     .filter((plan) => plan.next_reading)
@@ -1723,33 +1787,27 @@ function renderBookReadingPlans(plans, date) {
     ? `Next planned: ${formatDate(next.date)} · ${next.reference} (${next.title})`
     : "";
 
-  scheduled.forEach((plan) => {
-    const row = document.createElement("li");
-    row.className = "reading-item";
-    row.classList.toggle("completed", plan.today_reading.completed);
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = plan.today_reading.completed;
-    checkbox.id = `book-reading-${plan.id}`;
-    checkbox.addEventListener("change", () => toggleBookReadingCompletion(plan.id, date));
-    const label = document.createElement("label");
-    label.htmlFor = checkbox.id;
-    const planTitle = document.createElement("span");
-    planTitle.className = "reading-date";
-    planTitle.textContent = plan.title;
-    const reference = document.createElement("span");
-    reference.className = "reading-reference";
-    reference.textContent = plan.today_reading.reference;
-    label.append(planTitle, reference);
-    row.append(checkbox, label);
-    elements.bookPlanTodayList.append(row);
-  });
+  scheduled.forEach((plan) => appendBookReadingItem(
+    elements.bookPlanTodayList,
+    plan,
+    plan.today_reading,
+    date,
+  ));
+  elements.bookPlanOverdueList.replaceChildren();
+  elements.bookPlanOverdueSection.hidden = overdueReadings.length === 0;
+  overdueReadings.forEach((reading) => appendBookReadingItem(
+    elements.bookPlanOverdueList,
+    { id: reading.plan_id, title: reading.title },
+    { reference: reading.reference, completed: false },
+    reading.scheduled_date,
+    true,
+  ));
 }
 
 function renderBookPlanSettings(plans) {
   elements.bookPlanList.replaceChildren();
   elements.bookPlansEmpty.hidden = plans.length > 0;
-  elements.bookPlansEmpty.textContent = "No book reading plans yet. Create one to schedule chapters through one or more books.";
+  elements.bookPlansEmpty.textContent = "No active book reading plans. Create one here, or view completed plans in the Library.";
   plans.forEach((plan) => {
     const row = document.createElement("li");
     row.className = "book-plan-item";
@@ -1784,6 +1842,30 @@ function renderBookPlanSettings(plans) {
   });
 }
 
+function renderCompletedReadingPlans(plans, error = "") {
+  elements.completedPlansCount.textContent = error ? "Unavailable" : plans.length.toLocaleString();
+  elements.completedPlansEmpty.hidden = plans.length > 0 && !error;
+  elements.completedPlansEmpty.textContent = error || "No completed reading plans yet.";
+  elements.completedPlansList.replaceChildren();
+  plans.forEach((plan) => {
+    const row = document.createElement("li");
+    row.className = "book-plan-item";
+    const details = document.createElement("div");
+    details.className = "book-plan-details";
+    const title = document.createElement("h3");
+    title.textContent = plan.title;
+    const scope = document.createElement("p");
+    scope.className = "book-plan-schedule";
+    scope.textContent = plan.reading_scope;
+    const progress = document.createElement("p");
+    progress.className = "book-plan-progress muted";
+    progress.textContent = `Completed all ${plan.total_readings} readings · ${plan.total_chapters} chapters`;
+    details.append(title, scope, progress);
+    row.append(details);
+    elements.completedPlansList.append(row);
+  });
+}
+
 function formatSelectedChapters(selections) {
   const books = [];
   for (const selection of selections || []) {
@@ -1798,10 +1880,52 @@ function formatSelectedChapters(selections) {
   return books.map((group) => `${group.book} ${group.ranges.join(", ")}`).join("; ");
 }
 
+function populateBookPlanBookSelect() {
+  for (const book of bibleChapterCounts.keys()) {
+    if (book === "song of songs") continue;
+    const option = document.createElement("option");
+    option.value = book.replace(/\b\w/g, (letter) => letter.toUpperCase()).replace(/\b(Of|The)\b/g, (word) => word.toLowerCase());
+    option.textContent = option.value;
+    elements.bookPlanBookSelect.append(option);
+  }
+}
+
+function renderBookPlanSelectedBooks() {
+  elements.bookPlanBooks.value = state.selectedBookPlanBooks.join(", ");
+  elements.bookPlanSelectedBooks.replaceChildren();
+  state.selectedBookPlanBooks.forEach((book) => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = book;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "button button-quiet";
+    remove.textContent = "Remove";
+    remove.setAttribute("aria-label", `Remove ${book}`);
+    remove.addEventListener("click", () => {
+      state.selectedBookPlanBooks = state.selectedBookPlanBooks.filter((selected) => selected !== book);
+      renderBookPlanSelectedBooks();
+    });
+    item.append(name, remove);
+    elements.bookPlanSelectedBooks.append(item);
+  });
+}
+
+function addBookPlanBook() {
+  const book = elements.bookPlanBookSelect.value;
+  if (!book) return;
+  if (state.selectedBookPlanBooks.includes(book)) {
+    showToast(`${book} is already in this plan.`, true);
+    return;
+  }
+  state.selectedBookPlanBooks.push(book);
+  elements.bookPlanBookSelect.value = "";
+  renderBookPlanSelectedBooks();
+}
+
 function updateBookPlanMode() {
   const choosingChapters = elements.bookPlanMode.value === "chapters";
   elements.bookPlanBooksField.hidden = choosingChapters;
-  elements.bookPlanBooks.required = !choosingChapters;
   elements.bookPlanSelectionsField.hidden = !choosingChapters;
   elements.bookPlanSelections.required = choosingChapters;
 }
@@ -1823,7 +1947,8 @@ function editBookReadingPlan(plan) {
   elements.bookPlanEditId.value = plan.id;
   elements.bookPlanTitle.value = plan.title;
   elements.bookPlanMode.value = plan.chapter_selections?.length ? "chapters" : "books";
-  elements.bookPlanBooks.value = plan.chapter_selections?.length ? "" : plan.books.join(", ");
+  state.selectedBookPlanBooks = plan.chapter_selections?.length ? [] : [...plan.books];
+  renderBookPlanSelectedBooks();
   elements.bookPlanSelections.value = formatSelectedChapters(plan.chapter_selections);
   elements.bookPlanChapters.value = plan.chapters_per_reading;
   elements.bookPlanInterval.value = plan.interval_days;
@@ -1841,6 +1966,8 @@ function resetBookPlanForm() {
   elements.bookPlanSaveButton.textContent = "Create plan";
   elements.bookPlanEditWarning.hidden = true;
   elements.bookPlanStartDate.value = localDateKey();
+  state.selectedBookPlanBooks = [];
+  renderBookPlanSelectedBooks();
   state.bookPlanOriginal = null;
   updateBookPlanMode();
 }
@@ -1871,11 +1998,30 @@ async function saveBookReadingPlan(event) {
 
 async function toggleBookReadingCompletion(id, date) {
   try {
-    await requestJson(`/api/book-reading-plans/${id}/toggle?date=${date}`, { method: "POST" });
+    const result = await requestJson(`/api/book-reading-plans/${id}/toggle?date=${date}`, { method: "POST" });
+    if (result.completed && date < localDateKey()) showToast("Overdue reading marked complete.");
     await loadBookReadingPlans();
   } catch (error) {
     showToast(error.message, true);
     await loadBookReadingPlans();
+  }
+}
+
+async function saveQuickChapterReading(event) {
+  event.preventDefault();
+  elements.quickReadingSaveButton.disabled = true;
+  try {
+    const result = await requestJson("/api/chapter-readings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chapter_selections: elements.quickReadingSelections.value }),
+    });
+    elements.quickReadingForm.reset();
+    showToast(`Logged ${result.reference} for today.`);
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    elements.quickReadingSaveButton.disabled = false;
   }
 }
 
@@ -1890,11 +2036,127 @@ async function deleteBookReadingPlan(plan) {
   }
 }
 
+// --- Reading statistics and scripture coverage ---
+function appendStatCard(title, value, description) {
+  const card = document.createElement("article");
+  card.className = "stats-card panel-card";
+  const label = document.createElement("p");
+  label.className = "eyebrow";
+  label.textContent = title;
+  const number = document.createElement("strong");
+  number.className = "stats-value";
+  number.textContent = value;
+  const hint = document.createElement("p");
+  hint.className = "muted";
+  hint.textContent = description;
+  card.append(label, number, hint);
+  elements.statsSummary.append(card);
+}
+
+function renderReadingStatistics(stats) {
+  elements.statsStatus.hidden = true;
+  elements.statsSummary.replaceChildren();
+  elements.statsTestamentProgress.replaceChildren();
+  elements.statsBookList.replaceChildren();
+  appendStatCard("NOTES TAKEN", stats.note_count.toLocaleString(), "Notes in your study library");
+  appendStatCard("CHAPTERS READ", stats.chapter_reads.toLocaleString(), "Includes rereading the same chapter");
+  appendStatCard("BIBLE READ-THROUGHS", stats.bible_read_throughs.toLocaleString(), "How many times you've read the entire Bible");
+  appendStatCard(
+    "CHAPTERS COVERED",
+    `${stats.unique_chapters_read.toLocaleString()} / ${stats.total_chapters.toLocaleString()}`,
+    "Distinct chapters logged or checked off in Today",
+  );
+  appendStatCard("BOOKS COMPLETED", `${stats.completed_books} / ${stats.books.length}`, "Every chapter read at least once");
+  appendStatCard("READING DAYS", stats.reading_days.toLocaleString(), `${stats.completed_readings.toLocaleString()} completed readings`);
+  appendStatCard(
+    "CURRENT STREAK",
+    `${stats.reading_streak.toLocaleString()} ${stats.reading_streak === 1 ? "day" : "days"}`,
+    stats.reading_streak ? "Read at least one chapter each day" : "Read a chapter today to start a streak",
+  );
+
+  stats.testaments.forEach((testament) => {
+    const row = document.createElement("div");
+    row.className = "testament-row";
+    const label = document.createElement("div");
+    label.className = "testament-label";
+    const name = document.createElement("strong");
+    name.textContent = testament.name;
+    const count = document.createElement("span");
+    count.textContent = `${testament.unique_chapters_read} of ${testament.total_chapters} chapters`;
+    label.append(name, count);
+    const progress = document.createElement("div");
+    progress.className = "progress-track";
+    const bar = document.createElement("span");
+    const percent = testament.total_chapters
+      ? Math.round((testament.unique_chapters_read / testament.total_chapters) * 100)
+      : 0;
+    bar.style.width = `${percent}%`;
+    progress.append(bar);
+    row.append(label, progress);
+    elements.statsTestamentProgress.append(row);
+  });
+
+  stats.books.forEach((book) => {
+    const details = document.createElement("details");
+    details.className = "stats-book";
+    const summary = document.createElement("summary");
+    const heading = document.createElement("span");
+    heading.className = "stats-book-heading";
+    const name = document.createElement("strong");
+    name.textContent = book.name;
+    const count = document.createElement("span");
+    count.textContent = `${book.unique_chapters_read} / ${book.total_chapters} chapters · ${book.chapter_reads} reads`;
+    heading.append(name, count);
+    summary.append(heading);
+    const progress = document.createElement("span");
+    progress.className = "progress-track stats-book-progress";
+    const bar = document.createElement("span");
+    bar.style.width = `${Math.round((book.unique_chapters_read / book.total_chapters) * 100)}%`;
+    progress.append(bar);
+    summary.append(progress);
+    const chapters = document.createElement("div");
+    chapters.className = "stats-chapters";
+    book.chapters.forEach((chapter) => {
+      const item = document.createElement("span");
+      item.className = "stats-chapter";
+      item.classList.toggle("read", chapter.reads > 0);
+      item.title = `${book.name} ${chapter.chapter}: read ${chapter.reads} ${chapter.reads === 1 ? "time" : "times"}`;
+      item.setAttribute("aria-label", item.title);
+      const chapterNumber = document.createElement("span");
+      chapterNumber.textContent = chapter.chapter;
+      const readCount = document.createElement("small");
+      readCount.textContent = chapter.reads ? `${chapter.reads}×` : "—";
+      item.append(chapterNumber, readCount);
+      chapters.append(item);
+    });
+    details.append(summary, chapters);
+    elements.statsBookList.append(details);
+  });
+}
+
+async function loadReadingStatistics() {
+  elements.statsRefreshButton.disabled = true;
+  elements.statsStatus.hidden = false;
+  elements.statsStatus.textContent = "Loading your reading stats…";
+  try {
+    renderReadingStatistics(await requestJson("/api/reading-statistics"));
+  } catch (error) {
+    elements.statsSummary.replaceChildren();
+    elements.statsTestamentProgress.replaceChildren();
+    elements.statsBookList.replaceChildren();
+    elements.statsStatus.textContent = `Could not load reading stats: ${error.message}`;
+  } finally {
+    elements.statsRefreshButton.disabled = false;
+  }
+}
+
+// --- View switching and Bible passage lookup ---
 function setActiveView(view) {
-  state.activeView = view === "today" ? "today" : "library";
+  state.activeView = view === "today" || view === "stats" ? view : "library";
   const showingToday = state.activeView === "today";
-  elements.libraryView.hidden = showingToday;
+  elements.libraryView.hidden = state.activeView !== "library";
   elements.todayView.hidden = !showingToday;
+  elements.statsView.hidden = state.activeView !== "stats";
   elements.navLinks.forEach((link) => {
     const active = link.dataset.view === state.activeView;
     link.classList.toggle("active", active);
@@ -1987,6 +2249,7 @@ function renderPassageVerses(text) {
   elements.esvResult.append(verses);
 }
 
+// --- UI event wiring ---
 elements.passageToggle.addEventListener("click", () => {
   setPassagePanelVisible(elements.passagePanel.hidden);
 });
@@ -1994,6 +2257,7 @@ elements.saveButton.addEventListener("click", saveNote);
 elements.deleteButton.addEventListener("click", deleteNote);
 elements.refreshButton.addEventListener("click", refreshLibrary);
 elements.todayRefreshButton.addEventListener("click", loadReadingPlan);
+elements.quickReadingForm.addEventListener("submit", saveQuickChapterReading);
 setSelectedScheduleDate(localDateKey());
 elements.bookPlanStartDate.value = localDateKey();
 if (elements.scheduleDate) {
@@ -2009,6 +2273,8 @@ if (elements.bookPlanDate) {
   });
 }
 elements.bookPlanMode.addEventListener("change", updateBookPlanMode);
+populateBookPlanBookSelect();
+elements.bookPlanAddBookButton.addEventListener("click", addBookPlanBook);
 updateBookPlanMode();
 elements.bookPlanSettingsButton.addEventListener("click", () => {
   const open = elements.bookPlanSettings.hidden;
@@ -2108,16 +2374,25 @@ elements.navLinks.forEach((link) => {
     }
     setActiveView(link.dataset.view);
     if (link.dataset.view === "today") loadReadingPlan();
+    if (link.dataset.view === "stats") loadReadingStatistics();
   });
 });
 window.addEventListener("popstate", () => {
-  const targetView = !window.location.hash || window.location.hash === "#today" ? "today" : "library";
+  const targetView = !window.location.hash || window.location.hash === "#today"
+    ? "today"
+    : window.location.hash === "#stats" ? "stats" : "library";
   setActiveView(targetView);
+  if (targetView === "today") loadReadingPlan();
+  if (targetView === "stats") loadReadingStatistics();
 });
 elements.esvForm.addEventListener("submit", lookupEsv);
 elements.noteSearchForm.addEventListener("submit", searchNotes);
+elements.statsRefreshButton.addEventListener("click", loadReadingStatistics);
 
-const initialView = !window.location.hash || window.location.hash === "#today" ? "today" : "library";
+// --- Initial route and authenticated-session lifecycle ---
+const initialView = !window.location.hash || window.location.hash === "#today"
+  ? "today"
+  : window.location.hash === "#stats" ? "stats" : "library";
 if (!window.location.hash) {
   window.history.replaceState(null, "", "#today");
 }
@@ -2136,11 +2411,14 @@ async function showSession(session) {
   if (state.userId && state.userId !== session.user.id) clearSignedOutState();
   if (state.userId === session.user.id) return;
   state.userId = session.user.id;
-  await Promise.all([loadVault(), loadReadingPlan()]);
+  const requests = [loadVault(), loadReadingPlan()];
+  if (state.activeView === "stats") requests.push(loadReadingStatistics());
+  await Promise.all(requests);
 }
 
 function clearSignedOutState() {
   state.userId = null;
+  state.selectedBookPlanBooks = [];
   state.editorSelection = null;
   state.folders = [];
   state.activeFolder = null;
@@ -2156,6 +2434,16 @@ function clearSignedOutState() {
   elements.folderLabel.textContent = "SELECT A FOLDER";
   elements.searchResults.replaceChildren();
   elements.searchCount.textContent = "";
+  elements.bookPlanBooks.value = "";
+  elements.bookPlanSelectedBooks.replaceChildren();
+  elements.completedPlansCount.textContent = "0";
+  elements.completedPlansEmpty.hidden = false;
+  elements.completedPlansEmpty.textContent = "Sign in to load completed reading plans.";
+  elements.completedPlansList.replaceChildren();
+  elements.statsSummary.replaceChildren();
+  elements.statsTestamentProgress.replaceChildren();
+  elements.statsBookList.replaceChildren();
+  elements.statsStatus.hidden = true;
   elements.notePath.textContent = "NO NOTE OPEN";
   elements.noteTitle.value = "Select a note to begin";
   elements.noteTitle.disabled = true;

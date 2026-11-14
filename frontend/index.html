@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#111827">
     <title>Scripture Study</title>
     <link rel="stylesheet" href="./styles.css">
+    <!-- Startup error reporting and external Supabase client -->
     <script>
       window.addEventListener("error", (event) => {
         const detail = event.target instanceof HTMLScriptElement
@@ -28,6 +29,7 @@
     <script type="module" src="./app.js"></script>
   </head>
   <body>
+    <!-- Global navigation and signed-in account controls -->
     <header class="topbar">
       <a class="brand" href="./index.html" aria-label="Scripture Study home">
         <span class="brand-mark" aria-hidden="true">✦</span>
@@ -36,6 +38,7 @@
       <nav class="top-nav" aria-label="Main navigation">
         <a class="nav-link active" href="#library" data-view="library" aria-current="page">Library</a>
         <a class="nav-link" href="#today" data-view="today">Today</a>
+        <a class="nav-link" href="#stats" data-view="stats">Stats</a>
         <a class="nav-link" href="./upload.html">Add notes</a>
       </nav>
       <div class="vault-status">
@@ -45,6 +48,7 @@
       </div>
     </header>
 
+    <!-- Sign-in screen shown before authentication -->
     <main class="auth-panel" id="auth-panel">
       <form class="auth-card" id="auth-form" method="post" onsubmit="event.preventDefault();document.querySelector('#auth-message').textContent=window.__appScriptError||'Secure sign-in is unavailable. Reload the page and try again.'">
         <p class="eyebrow">YOUR PRIVATE STUDY SPACE</p>
@@ -59,8 +63,10 @@
       </form>
     </main>
 
+    <!-- Authenticated app workspace -->
     <main class="app-shell" hidden>
       <div class="workspace">
+        <!-- Library: folders, archived plans, search, and note editor -->
         <section id="library-view" class="workspace-view" aria-labelledby="library-title">
         <div class="page-heading">
           <div>
@@ -73,6 +79,7 @@
           </div>
         </div>
 
+        <!-- Study folders -->
         <section id="library" aria-labelledby="library-title">
           <div class="section-heading">
             <div>
@@ -84,6 +91,17 @@
           <div class="folder-grid" id="folder-grid" aria-live="polite"></div>
         </section>
 
+        <!-- Completed reading plan archive -->
+        <details class="panel-card completed-reading-plans">
+          <summary>
+            <span>Completed reading plans</span>
+            <span class="completed-plans-count" id="completed-plans-count">Loading…</span>
+          </summary>
+          <p class="empty-state" id="completed-plans-empty" hidden></p>
+          <ul class="book-plan-list" id="completed-plans-list" aria-live="polite"></ul>
+        </details>
+
+        <!-- Search and filter across notes -->
         <section class="global-search" aria-labelledby="search-title">
           <div class="section-heading">
             <div>
@@ -135,6 +153,7 @@
           <div class="search-results" id="search-results" aria-live="polite"></div>
         </section>
 
+        <!-- Note list, editor, formatting tools, and attachments -->
         <section class="notes-section" aria-labelledby="notes-title">
           <div class="section-heading">
             <div>
@@ -235,6 +254,7 @@
               tabindex="0"
               hidden
             ></div>
+            <!-- Optional Bible passage lookup beside the note editor -->
             <aside class="passage-panel" id="passage-panel" aria-label="Bible passage" hidden>
               <section class="panel-card esv-card" aria-labelledby="esv-title">
                 <div class="panel-heading">
@@ -276,6 +296,7 @@
         </section>
         </section>
 
+        <!-- Today: recurring tasks, reading plans, quick logs, and overdue readings -->
         <section id="today-view" class="workspace-view" aria-labelledby="today-title" hidden>
           <div class="page-heading">
             <div>
@@ -291,6 +312,7 @@
             </div>
           </div>
 
+          <!-- Recurring task configuration -->
           <section id="today-task-settings" class="today-task-settings panel-card" hidden>
             <div class="panel-heading"><div><p class="eyebrow">RECURRING ROUTINE</p><h2>Task settings</h2></div></div>
             <form id="today-task-form" class="task-settings-form">
@@ -306,15 +328,25 @@
             <ul id="task-settings-list" class="task-settings-list"></ul>
           </section>
 
+          <!-- Book reading plan configuration -->
           <section id="book-plan-settings" class="today-task-settings panel-card book-plan-settings" hidden>
             <div class="panel-heading">
               <div><p class="eyebrow">READ THROUGH BOOKS</p><h2>Book plan settings</h2></div>
             </div>
             <form id="book-plan-form" class="book-plan-form">
               <input id="book-plan-edit-id" type="hidden">
-              <label>Plan name<input id="book-plan-title" maxlength="120" required placeholder="e.g. Old Testament foundations"></label>
+              <label>Plan name (optional)<input id="book-plan-title" maxlength="120" placeholder="Defaults to the selected books"></label>
               <label>Plan type<select id="book-plan-mode"><option value="books">Read whole books</option><option value="chapters">Choose specific chapters</option></select></label>
-              <label id="book-plan-books-field">Books in order<input id="book-plan-books" placeholder="e.g. Genesis, Exodus"></label>
+              <div id="book-plan-books-field" class="book-plan-books-field">
+                <span>Books in order</span>
+                <div class="book-plan-book-picker">
+                  <label class="sr-only" for="book-plan-book-select">Choose a Bible book</label>
+                  <select id="book-plan-book-select"><option value="">Choose a book…</option></select>
+                  <button class="button button-quiet" id="book-plan-add-book-button" type="button">Add book</button>
+                </div>
+                <ul class="book-plan-selected-books" id="book-plan-selected-books" aria-live="polite"></ul>
+                <input id="book-plan-books" type="hidden">
+              </div>
               <label id="book-plan-selections-field" hidden>Chapters to read<input id="book-plan-selections" placeholder="Genesis 4, 7-9; Exodus 2, 5"><small>Separate books with semicolons; list chapters or ranges with commas.</small></label>
               <label>Chapters per reading<input id="book-plan-chapters" type="number" min="1" max="50" value="2" required></label>
               <label>Read every (days)<input id="book-plan-interval" type="number" min="1" max="365" value="1" required></label>
@@ -329,12 +361,14 @@
             <ul class="book-plan-list" id="book-plan-list" aria-live="polite"></ul>
           </section>
 
+          <!-- Today's recurring task checklist -->
           <section class="today-plan-card panel-card today-tasks-card" aria-labelledby="today-tasks-title">
             <div class="panel-heading"><div><p class="eyebrow">RECURRING ROUTINE</p><h2 id="today-tasks-title">Today's tasks</h2></div></div>
             <p class="empty-state" id="today-tasks-empty" hidden></p>
             <ul class="reading-list today-reading-list" id="today-task-list" aria-live="polite"></ul>
           </section>
 
+          <!-- Scheduled reading checklist and next reading preview -->
           <section class="today-plan-card panel-card book-plans-card" aria-labelledby="book-reading-title">
             <div class="panel-heading">
               <div><p class="eyebrow">SCHEDULED READINGS</p><h2 id="book-reading-title">Book reading plan</h2></div>
@@ -351,9 +385,61 @@
             <ul class="reading-list today-reading-list" id="book-plan-today-list" aria-live="polite"></ul>
             <p class="today-upcoming muted" id="book-plan-upcoming" hidden></p>
           </section>
+
+          <!-- Manually log chapters outside a reading plan -->
+          <section class="today-plan-card panel-card quick-reading-card" aria-labelledby="quick-reading-title">
+            <div class="panel-heading">
+              <div><p class="eyebrow">EXTRA READING</p><h2 id="quick-reading-title">Log chapters read today</h2></div>
+            </div>
+            <p class="muted quick-reading-hint">Add chapters even if they aren't part of a reading plan.</p>
+            <form id="quick-reading-form" class="quick-reading-form">
+              <label for="quick-reading-selections">Chapters read
+                <input id="quick-reading-selections" name="chapters" required placeholder="Genesis 1-3; John 3">
+                <small>Separate books with semicolons; use commas or ranges for chapters.</small>
+              </label>
+              <button class="button button-primary" id="quick-reading-save-button" type="submit">Add chapters</button>
+            </form>
+          </section>
+
+          <!-- Missed daily readings that can be checked off while catching up -->
+          <section id="book-plan-overdue-section" class="today-plan-card panel-card overdue-readings-card" aria-labelledby="book-plan-overdue-title" hidden>
+            <div class="panel-heading">
+              <div><p class="eyebrow">CATCH UP</p><h2 id="book-plan-overdue-title">Overdue readings</h2></div>
+            </div>
+            <p class="muted overdue-readings-hint">Missed daily-plan readings, oldest first. Check one off as you catch up.</p>
+            <ul class="reading-list today-reading-list" id="book-plan-overdue-list" aria-live="polite"></ul>
+          </section>
+        </section>
+
+        <!-- Reading totals, scripture coverage, and per-chapter history -->
+        <section id="stats-view" class="workspace-view" aria-labelledby="stats-title" hidden>
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">YOUR STUDY OVER TIME</p>
+              <h1 id="stats-title">Reading Stats [Since Nov. 2026]</h1>
+              <p class="subheading">Completed Book reading plan checkmarks and extra chapters logged in Today count here. Re-reading a chapter counts again.</p>
+            </div>
+            <button class="button button-quiet" id="stats-refresh-button" type="button">Refresh stats</button>
+          </div>
+          <p class="empty-state stats-status" id="stats-status" role="status" aria-live="polite" hidden></p>
+          <div class="stats-summary" id="stats-summary"></div>
+          <section class="panel-card stats-testaments" aria-labelledby="stats-testaments-title">
+            <div class="panel-heading">
+              <div><p class="eyebrow">SCRIPTURE COVERAGE</p><h2 id="stats-testaments-title">Progress by testament</h2></div>
+            </div>
+            <div class="testament-progress" id="stats-testament-progress"></div>
+          </section>
+          <section class="stats-books-section" aria-labelledby="stats-books-title">
+            <div class="section-heading">
+              <div><p class="eyebrow">CHAPTERS READ</p><h2 id="stats-books-title">Books of the Bible</h2></div>
+              <p class="muted">Expand a book to see how many times each chapter was logged or checked off.</p>
+            </div>
+            <div class="stats-book-list" id="stats-book-list"></div>
+          </section>
         </section>
       </div>
 
+      <!-- Shared privacy and account information -->
       <aside class="side-panel">
         <div class="local-note">
           <span class="local-note-icon" aria-hidden="true">⌂</span>
@@ -361,6 +447,7 @@
         </div>
       </aside>
     </main>
+    <!-- Transient success and error messages -->
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>
