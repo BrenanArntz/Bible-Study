@@ -157,6 +157,24 @@ create table if not exists public.study_reading_plans (
 alter table public.study_reading_plans
     add column if not exists chapter_selections jsonb;
 
+alter table public.study_reading_plans
+    add column if not exists cadence_type text not null default 'interval';
+
+alter table public.study_reading_plans
+    add column if not exists weekdays integer[];
+
+alter table public.study_reading_plans
+    add column if not exists status text not null default 'active';
+
+alter table public.study_reading_plans
+    add column if not exists collaborator_email text;
+
+alter table public.study_reading_plans
+    add column if not exists owner_email text;
+
+alter table public.study_reading_plans
+    alter column interval_days drop not null;
+
 do $$
 begin
     if not exists (
@@ -169,11 +187,50 @@ begin
             add constraint study_reading_plans_chapter_selections_array
             check (chapter_selections is null or jsonb_typeof(chapter_selections) = 'array');
     end if;
+
+    if not exists (
+        select 1
+        from pg_constraint
+        where conname = 'study_reading_plans_cadence_type_check'
+          and conrelid = 'public.study_reading_plans'::regclass
+    ) then
+        alter table public.study_reading_plans
+            add constraint study_reading_plans_cadence_type_check
+            check (cadence_type in ('interval', 'weekdays'));
+    end if;
+
+    if not exists (
+        select 1
+        from pg_constraint
+        where conname = 'study_reading_plans_status_check'
+          and conrelid = 'public.study_reading_plans'::regclass
+    ) then
+        alter table public.study_reading_plans
+            add constraint study_reading_plans_status_check
+            check (status in ('active', 'completed', 'cancelled'));
+    end if;
+
+    if not exists (
+        select 1
+        from pg_constraint
+        where conname = 'study_reading_plans_weekdays_check'
+          and conrelid = 'public.study_reading_plans'::regclass
+    ) then
+        alter table public.study_reading_plans
+            add constraint study_reading_plans_weekdays_check
+            check (weekdays is null or (cardinality(weekdays) between 1 and 7));
+    end if;
 end;
 $$;
 
 create index if not exists study_reading_plans_user_created_idx
     on public.study_reading_plans (user_id, created_at);
+create index if not exists study_reading_plans_collaborator_idx
+    on public.study_reading_plans (lower(collaborator_email));
+create index if not exists study_reading_plans_owner_email_idx
+    on public.study_reading_plans (lower(owner_email));
+create index if not exists study_reading_plans_status_idx
+    on public.study_reading_plans (status);
 
 create table if not exists public.study_reading_plan_completions (
     plan_id uuid not null references public.study_reading_plans(id) on delete cascade,
@@ -202,25 +259,103 @@ alter table public.study_reading_plan_completions enable row level security;
 alter table public.study_chapter_readings enable row level security;
 
 drop policy if exists "Users manage their own book reading plans" on public.study_reading_plans;
-create policy "Users manage their own book reading plans" on public.study_reading_plans
-    for all to authenticated using ((select auth.uid()) = user_id)
-    with check ((select auth.uid()) = user_id);
+drop policy if exists "Users read accessible reading plans" on public.study_reading_plans;
+drop policy if exists "Users insert own reading plans" on public.study_reading_plans;
+drop policy if exists "Users update accessible reading plans" on public.study_reading_plans;
+drop policy if exists "Users delete accessible reading plans" on public.study_reading_plans;
 
-drop policy if exists "Users manage their own book reading completions" on public.study_reading_plan_completions;
-create policy "Users manage their own book reading completions" on public.study_reading_plan_completions
-    for all to authenticated
+create policy "Users read accessible reading plans"
+    on public.study_reading_plans for select to authenticated
     using (
         (select auth.uid()) = user_id
-        and exists (
-            select 1 from public.study_reading_plans plan
-            where plan.id = plan_id and plan.user_id = (select auth.uid())
-        )
+        or (collaborator_email is not null and lower(collaborator_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+        or (owner_email is not null and lower(owner_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+    );
+
+create policy "Users insert own reading plans"
+    on public.study_reading_plans for insert to authenticated
+    with check ((select auth.uid()) = user_id);
+
+create policy "Users update accessible reading plans"
+    on public.study_reading_plans for update to authenticated
+    using (
+        (select auth.uid()) = user_id
+        or (collaborator_email is not null and lower(collaborator_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+        or (owner_email is not null and lower(owner_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
     )
+    with check (
+        (select auth.uid()) = user_id
+        or (collaborator_email is not null and lower(collaborator_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+        or (owner_email is not null and lower(owner_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+    );
+
+create policy "Users delete accessible reading plans"
+    on public.study_reading_plans for delete to authenticated
+    using (
+        (select auth.uid()) = user_id
+        or (collaborator_email is not null and lower(collaborator_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+    );
+
+drop policy if exists "Users manage their own book reading completions" on public.study_reading_plan_completions;
+drop policy if exists "Users read accessible reading completions" on public.study_reading_plan_completions;
+drop policy if exists "Users insert accessible reading completions" on public.study_reading_plan_completions;
+drop policy if exists "Users update accessible reading completions" on public.study_reading_plan_completions;
+drop policy if exists "Users delete accessible reading completions" on public.study_reading_plan_completions;
+
+create policy "Users read accessible reading completions"
+    on public.study_reading_plan_completions for select to authenticated
+    using (
+        exists (
+            select 1 from public.study_reading_plans plan
+            where plan.id = plan_id
+              and (
+                  plan.user_id = (select auth.uid())
+                  or (plan.collaborator_email is not null and lower(plan.collaborator_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+                  or (plan.owner_email is not null and lower(plan.owner_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+              )
+        )
+    );
+
+create policy "Users insert accessible reading completions"
+    on public.study_reading_plan_completions for insert to authenticated
     with check (
         (select auth.uid()) = user_id
         and exists (
             select 1 from public.study_reading_plans plan
-            where plan.id = plan_id and plan.user_id = (select auth.uid())
+            where plan.id = plan_id
+              and (
+                  plan.user_id = (select auth.uid())
+                  or (plan.collaborator_email is not null and lower(plan.collaborator_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+                  or (plan.owner_email is not null and lower(plan.owner_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+              )
+        )
+    );
+
+create policy "Users update accessible reading completions"
+    on public.study_reading_plan_completions for update to authenticated
+    using (
+        exists (
+            select 1 from public.study_reading_plans plan
+            where plan.id = plan_id
+              and (
+                  plan.user_id = (select auth.uid())
+                  or (plan.collaborator_email is not null and lower(plan.collaborator_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+                  or (plan.owner_email is not null and lower(plan.owner_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+              )
+        )
+    );
+
+create policy "Users delete accessible reading completions"
+    on public.study_reading_plan_completions for delete to authenticated
+    using (
+        exists (
+            select 1 from public.study_reading_plans plan
+            where plan.id = plan_id
+              and (
+                  plan.user_id = (select auth.uid())
+                  or (plan.collaborator_email is not null and lower(plan.collaborator_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+                  or (plan.owner_email is not null and lower(plan.owner_email) = lower(coalesce(auth.jwt() ->> 'email', '')))
+              )
         )
     );
 
@@ -243,7 +378,9 @@ begin
         or new.chapter_selections is distinct from old.chapter_selections
         or new.chapters_per_reading is distinct from old.chapters_per_reading
         or new.interval_days is distinct from old.interval_days
-        or new.start_date is distinct from old.start_date then
+        or new.start_date is distinct from old.start_date
+        or new.cadence_type is distinct from old.cadence_type
+        or new.weekdays is distinct from old.weekdays then
         delete from public.study_reading_plan_completions
         where plan_id = old.id;
     end if;
@@ -253,7 +390,7 @@ $$;
 
 drop trigger if exists study_reading_plan_schedule_changed on public.study_reading_plans;
 create trigger study_reading_plan_schedule_changed
-    before update of books, chapter_selections, chapters_per_reading, interval_days, start_date
+    before update of books, chapter_selections, chapters_per_reading, interval_days, start_date, cadence_type, weekdays
     on public.study_reading_plans
     for each row execute function public.clear_book_reading_plan_completions_on_schedule_change();
 

@@ -606,7 +606,7 @@ function canonicalBookName(value) {
   return canonical.replace(/\b\w/g, (letter) => letter.toUpperCase()).replace(/\b(Of|The)\b/g, (word) => word.toLowerCase());
 }
 
-function normalizeChapterSelections(value) {
+export function normalizeChapterSelections(value) {
   const groups = String(value || "").split(";").map((group) => group.trim()).filter(Boolean);
   if (!groups.length) throw new Error("Enter chapter selections, such as Genesis 4, 7-9; Exodus 2.");
   const selections = [];
@@ -640,8 +640,80 @@ function chapterSegments(plan) {
     : plan.books.map((book) => ({ book, start: 1, end: BIBLE_CHAPTER_COUNTS.get(book.toLowerCase()) }));
 }
 
-function totalChapterCount(plan) {
+export function totalChapterCount(plan) {
   return chapterSegments(plan).reduce((total, segment) => total + segment.end - segment.start + 1, 0);
+}
+
+export function scheduledDateForIndex(plan, index) {
+  if (plan.cadence_type === "weekdays" && Array.isArray(plan.weekdays) && plan.weekdays.length > 0) {
+    const dayNumber = dateDayNumber(plan.start_date);
+    let matchCount = -1;
+    for (let i = 0; i < 10000; i += 1) {
+      const dateStr = dateFromDayNumber(dayNumber + i);
+      const weekday = new Date(`${dateStr}T12:00:00Z`).getUTCDay();
+      if (plan.weekdays.includes(weekday)) {
+        matchCount += 1;
+        if (matchCount === index) {
+          return dateStr;
+        }
+      }
+    }
+  }
+  const interval = plan.interval_days || 1;
+  return dateFromDayNumber(dateDayNumber(plan.start_date) + index * interval);
+}
+
+export function readingIndexForDate(plan, dateKey) {
+  if (!validDateKey(dateKey) || !validDateKey(plan.start_date) || dateKey < plan.start_date) {
+    return -1;
+  }
+  if (plan.cadence_type === "weekdays" && Array.isArray(plan.weekdays) && plan.weekdays.length > 0) {
+    const weekday = new Date(`${dateKey}T12:00:00Z`).getUTCDay();
+    if (!plan.weekdays.includes(weekday)) return -1;
+    const startDay = dateDayNumber(plan.start_date);
+    const targetDay = dateDayNumber(dateKey);
+    let count = 0;
+    for (let day = startDay; day <= targetDay; day += 1) {
+      const dStr = dateFromDayNumber(day);
+      const w = new Date(`${dStr}T12:00:00Z`).getUTCDay();
+      if (plan.weekdays.includes(w)) {
+        count += 1;
+      }
+    }
+    return count - 1;
+  }
+  const daysSinceStart = dateDayNumber(dateKey) - dateDayNumber(plan.start_date);
+  const interval = plan.interval_days || 1;
+  if (daysSinceStart % interval !== 0) return -1;
+  return daysSinceStart / interval;
+}
+
+export function formatCadence(plan) {
+  if (plan.cadence_type === "weekdays" && Array.isArray(plan.weekdays) && plan.weekdays.length > 0) {
+    if (plan.weekdays.length === 7) return "every day";
+    const weekdaysSorted = [...plan.weekdays].sort((a, b) => a - b);
+    const isMonFri = weekdaysSorted.length === 5 && weekdaysSorted.every((d, i) => d === i + 1);
+    if (isMonFri) return "every weekday (Mon–Fri)";
+    const isWeekend = weekdaysSorted.length === 2 && weekdaysSorted[0] === 0 && weekdaysSorted[1] === 6;
+    if (isWeekend) return "weekends (Sat–Sun)";
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return `on ${weekdaysSorted.map((d) => dayNames[d]).join(", ")}`;
+  }
+  const interval = plan.interval_days || 1;
+  return interval === 1 ? "every day" : `every ${interval} days`;
+}
+
+function groupChaptersToSelections(chapters) {
+  const selections = [];
+  for (const item of chapters) {
+    const prev = selections.at(-1);
+    if (prev && prev.book === item.book && prev.end + 1 === item.chapter) {
+      prev.end = item.chapter;
+    } else {
+      selections.push({ book: item.book, start: item.chapter, end: item.chapter });
+    }
+  }
+  return selections;
 }
 
 function formatChapterSelections(selections) {
@@ -711,33 +783,109 @@ function normalizeReadingPlan(payload) {
     ? bookTitle
     : `${books[0]} + ${books.length - 1} more books`);
   const chaptersPerReading = Number(payload.chapters_per_reading);
-  const intervalDays = Number(payload.interval_days);
   const startDate = String(payload.start_date || "");
+
+  const cadenceType = payload.cadence_type === "weekdays" ? "weekdays" : "interval";
+  let intervalDays = Number(payload.interval_days);
+  let weekdays = null;
+
+  if (cadenceType === "weekdays") {
+    weekdays = [...new Set((Array.isArray(payload.weekdays) ? payload.weekdays : []).map(Number))].sort((a, b) => a - b);
+    if (!weekdays.length || weekdays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) {
+      throw new Error("Select at least one day of the week for this reading plan.");
+    }
+    intervalDays = Number.isInteger(intervalDays) && intervalDays >= 1 && intervalDays <= 365 ? intervalDays : 1;
+  } else {
+    if (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 365) {
+      throw new Error("Enter a valid interval between 1 and 365 days.");
+    }
+  }
+
+  let collaboratorEmail = null;
+  if (payload.collaborator_email) {
+    const email = String(payload.collaborator_email).trim().toLowerCase();
+    if (email) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error("Enter a valid partner email address.");
+      }
+      collaboratorEmail = email;
+    }
+  }
+
   if (!title || title.length > 120 || !books.length || !Number.isInteger(chaptersPerReading) || chaptersPerReading < 1 || chaptersPerReading > 50
-    || !Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 365 || !validDateKey(startDate)) {
-    throw new Error("Choose one or more books, a valid chapter amount, interval, and start date.");
+    || !validDateKey(startDate)) {
+    throw new Error("Choose one or more books, a valid chapter amount, cadence, and start date.");
   }
   return {
     title,
     books,
     chapter_selections: chapterSelections,
     chapters_per_reading: chaptersPerReading,
+    cadence_type: cadenceType,
     interval_days: intervalDays,
+    weekdays,
+    collaborator_email: collaboratorEmail,
+    status: payload.status && ["active", "completed", "cancelled"].includes(payload.status) ? payload.status : "active",
     start_date: startDate,
   };
 }
 
 // --- Book plans, overdue readings, completions, and reading statistics ---
+function getLocalPlanStatuses(userId) {
+  try {
+    const raw = localStorage.getItem(`study_plan_statuses_${userId}`);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function setLocalPlanStatus(userId, planId, status) {
+  try {
+    const statuses = getLocalPlanStatuses(userId);
+    if (status) {
+      statuses[planId] = status;
+    } else {
+      delete statuses[planId];
+    }
+    localStorage.setItem(`study_plan_statuses_${userId}`, JSON.stringify(statuses));
+  } catch (error) {
+    console.error("Could not persist local plan status", error);
+  }
+}
+
+async function fetchReadingPlans() {
+  const user = await currentUser();
+  const localStatuses = getLocalPlanStatuses(user.id);
+
+  const fullColumns = "id,title,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,status,collaborator_email,owner_email,user_id,created_at";
+  const { data, error } = await supabase.from("study_reading_plans").select(fullColumns).order("created_at");
+  let plans = data;
+  if (error) {
+    if (error.message?.includes("column") || error.code === "42703") {
+      const fallbackColumns = "id,title,books,chapter_selections,chapters_per_reading,interval_days,start_date,created_at,user_id";
+      const { data: fallbackData, error: fallbackError } = await supabase.from("study_reading_plans").select(fallbackColumns).order("created_at");
+      if (fallbackError) return fail(fallbackError, "Could not load book reading plans");
+      plans = fallbackData || [];
+    } else {
+      return fail(error, "Could not load book reading plans");
+    }
+  }
+
+  return (plans || []).map((plan) => {
+    const status = localStatuses[plan.id] || plan.status || "active";
+    return { ...plan, status };
+  });
+}
+
 async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
   if (!validDateKey(date)) throw new Error("Use a valid reading plan date.");
-  const [{ data: plans, error: planError }, { data: completions, error: completionError }] = await Promise.all([
-    supabase.from("study_reading_plans")
-      .select("id,title,books,chapter_selections,chapters_per_reading,interval_days,start_date")
-      .order("created_at"),
-    supabase.from("study_reading_plan_completions").select("plan_id").eq("scheduled_date", date),
+  const [plans, { data: completions, error: completionError }] = await Promise.all([
+    fetchReadingPlans(),
+    supabase.from("study_reading_plan_completions").select("plan_id,scheduled_date").eq("scheduled_date", date),
   ]);
-  if (planError) return fail(planError, "Could not load book reading plans");
   if (completionError) return fail(completionError, "Could not load book reading completions");
+
   const completedCounts = await Promise.all((plans || []).map(async (plan) => {
     const { count, error } = await supabase.from("study_reading_plan_completions")
       .select("plan_id", { count: "exact", head: true })
@@ -748,20 +896,23 @@ async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
   const completedByPlan = new Map(completedCounts);
   const completedToday = new Set((completions || []).map((completion) => completion.plan_id));
   const today = localDateKey();
-  const currentDayNumber = dateDayNumber(today);
-  const dailyPlans = (plans || []).filter((plan) => plan.interval_days === 1);
-  const overdueCompletions = [];
-  if (dailyPlans.length) {
-    const earliestStart = dailyPlans.reduce(
+
+  // Active plans that are not cancelled
+  const activeCandidatePlans = (plans || []).filter((plan) => plan.status !== "cancelled");
+  const overdueReadings = [];
+
+  if (activeCandidatePlans.length) {
+    const earliestStart = activeCandidatePlans.reduce(
       (earliest, plan) => plan.start_date < earliest ? plan.start_date : earliest,
-      dailyPlans[0].start_date,
+      activeCandidatePlans[0].start_date,
     );
-    const dailyPlanIds = dailyPlans.map((plan) => plan.id);
+    const planIds = activeCandidatePlans.map((plan) => plan.id);
+    const overdueCompletions = [];
     const pageSize = 1000;
     for (let offset = 0; ; offset += pageSize) {
       const { data, error } = await supabase.from("study_reading_plan_completions")
         .select("plan_id,scheduled_date")
-        .in("plan_id", dailyPlanIds)
+        .in("plan_id", planIds)
         .gte("scheduled_date", earliestStart)
         .lt("scheduled_date", today)
         .order("plan_id")
@@ -771,58 +922,93 @@ async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
       overdueCompletions.push(...(data || []));
       if ((data || []).length < pageSize) break;
     }
-  }
-  const completedOverdue = new Set(
-    overdueCompletions.map((completion) => `${completion.plan_id}:${completion.scheduled_date}`),
-  );
-  const overdueReadings = [];
-  for (const plan of dailyPlans) {
-    const totalChapters = totalChapterCount(plan);
-    const totalReadings = Math.ceil(totalChapters / plan.chapters_per_reading);
-    const planStart = dateDayNumber(plan.start_date);
-    const overdueCount = Math.min(totalReadings, Math.max(0, currentDayNumber - planStart));
-    for (let index = 0; index < overdueCount; index += 1) {
-      const scheduledDate = dateFromDayNumber(planStart + index);
-      if (completedOverdue.has(`${plan.id}:${scheduledDate}`)) continue;
-      const reference = readingForOffset({ ...plan, total_chapters: totalChapters }, index);
-      if (!reference) continue;
-      overdueReadings.push({
-        plan_id: plan.id,
-        title: plan.title,
-        scheduled_date: scheduledDate,
-        reference,
-      });
+    const completedOverdue = new Set(
+      overdueCompletions.map((completion) => `${completion.plan_id}:${completion.scheduled_date}`),
+    );
+
+    const todayDayNum = dateDayNumber(today);
+    for (const plan of activeCandidatePlans) {
+      const totalChapters = totalChapterCount(plan);
+      const totalReadings = Math.ceil(totalChapters / plan.chapters_per_reading);
+      const planStartDayNum = dateDayNumber(plan.start_date);
+      const daysToCheck = Math.max(0, todayDayNum - planStartDayNum);
+      for (let dayOffset = 0; dayOffset < daysToCheck; dayOffset += 1) {
+        const scheduledDate = dateFromDayNumber(planStartDayNum + dayOffset);
+        const readingIndex = readingIndexForDate(plan, scheduledDate);
+        if (readingIndex >= 0 && readingIndex < totalReadings) {
+          if (!completedOverdue.has(`${plan.id}:${scheduledDate}`)) {
+            const reference = readingForOffset({ ...plan, total_chapters: totalChapters }, readingIndex);
+            if (reference) {
+              overdueReadings.push({
+                plan_id: plan.id,
+                title: plan.title,
+                scheduled_date: scheduledDate,
+                reference,
+                collaborator_email: plan.collaborator_email || null,
+              });
+            }
+          }
+        }
+      }
     }
   }
   overdueReadings.sort((left, right) => left.scheduled_date.localeCompare(right.scheduled_date));
-  const todayNumber = dateDayNumber(date);
+
   const items = (plans || []).map((plan) => {
     const totalChapters = totalChapterCount(plan);
     const totalReadings = Math.ceil(totalChapters / plan.chapters_per_reading);
-    const planStart = dateDayNumber(plan.start_date);
-    const todayOffset = todayNumber - planStart;
-    const todayIndex = todayOffset >= 0 && todayOffset % plan.interval_days === 0
-      ? todayOffset / plan.interval_days
-      : -1;
-    const nextIndex = Math.max(0, Math.ceil(Math.max(0, todayOffset) / plan.interval_days));
-    const todayReading = todayIndex >= 0 ? readingForOffset({ ...plan, total_chapters: totalChapters }, todayIndex) : null;
-    const nextReading = todayReading ? null : readingForOffset({ ...plan, total_chapters: totalChapters }, nextIndex);
-    const nextDate = todayReading ? date : dateFromDayNumber(planStart + nextIndex * plan.interval_days);
+    const todayIndex = readingIndexForDate(plan, date);
+    const todayReading = todayIndex >= 0 && todayIndex < totalReadings
+      ? readingForOffset({ ...plan, total_chapters: totalChapters }, todayIndex)
+      : null;
+
+    let nextReading = null;
+    let nextDate = null;
+    if (!todayReading && plan.status !== "cancelled") {
+      const startDay = Math.max(dateDayNumber(date), dateDayNumber(plan.start_date));
+      for (let i = 0; i < 1000; i += 1) {
+        const candidateDate = dateFromDayNumber(startDay + i);
+        if (candidateDate === date) continue;
+        const index = readingIndexForDate(plan, candidateDate);
+        if (index >= 0 && index < totalReadings) {
+          nextReading = readingForOffset({ ...plan, total_chapters: totalChapters }, index);
+          nextDate = candidateDate;
+          break;
+        }
+      }
+    }
+
+    const finishDate = scheduledDateForIndex(plan, totalReadings - 1);
     return {
       ...plan,
       reading_scope: plan.chapter_selections?.length ? formatChapterSelections(plan.chapter_selections) : plan.books.join(" + "),
       total_chapters: totalChapters,
       total_readings: totalReadings,
-      finish_date: dateFromDayNumber(planStart + (totalReadings - 1) * plan.interval_days),
+      finish_date: finishDate,
       completed_readings: completedByPlan.get(plan.id) || 0,
       today_reading: todayReading ? { reference: todayReading, completed: completedToday.has(plan.id) } : null,
       next_reading: nextReading ? { date: nextDate, reference: nextReading } : null,
     };
   });
-  const completedItems = items.filter((plan) => plan.completed_readings >= plan.total_readings);
+
+  const activeItems = [];
+  const completedItems = [];
+  const cancelledItems = [];
+
+  for (const plan of items) {
+    if (plan.status === "cancelled") {
+      cancelledItems.push(plan);
+    } else if (plan.completed_readings >= plan.total_readings) {
+      completedItems.push(plan);
+    } else {
+      activeItems.push(plan);
+    }
+  }
+
   return {
-    items: items.filter((plan) => plan.completed_readings < plan.total_readings),
+    items: activeItems,
     completed_items: completedItems,
+    cancelled_items: cancelledItems,
     date,
     overdue_readings: overdueReadings,
   };
@@ -830,16 +1016,14 @@ async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
 
 async function readingStatistics() {
   const [
-    { data: plans, error: planError },
+    plans,
     { count: noteCount, error: noteError },
   ] = await Promise.all([
-    supabase.from("study_reading_plans")
-      .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date"),
+    fetchReadingPlans(),
     supabase.from("study_notes")
       .select("id", { count: "exact", head: true })
       .in("category", NOTE_CATEGORIES),
   ]);
-  if (planError) return fail(planError, "Could not load reading statistics");
   if (noteError) return fail(noteError, "Could not count study notes");
 
   const completions = [];
@@ -881,25 +1065,20 @@ async function readingStatistics() {
 
   for (const completion of completions) {
     const plan = plansById.get(completion.plan_id);
-    if (!plan) throw new Error("A completed reading could not be matched to its reading plan.");
+    if (!plan) continue;
     const completedAt = new Date(completion.completed_at);
     if (!validDateKey(completion.scheduled_date) || !validDateKey(plan.start_date)
       || !Number.isFinite(completedAt.getTime())) {
-      throw new Error("A completed reading contains an invalid date.");
+      continue;
     }
     const totalChapters = totalChapterCount(plan);
-    const daysSinceStart = dateDayNumber(completion.scheduled_date) - dateDayNumber(plan.start_date);
-    const offset = daysSinceStart / plan.interval_days;
-    if (daysSinceStart < 0 || !Number.isInteger(offset)) {
-      throw new Error("A completed reading does not match its plan schedule.");
-    }
+    const offset = readingIndexForDate(plan, completion.scheduled_date);
+    if (offset < 0) continue;
     const chapters = chaptersForOffset({ ...plan, total_chapters: totalChapters }, offset);
-    if (!chapters.length) throw new Error("A completed reading has no chapters in its plan.");
+    if (!chapters.length) continue;
     for (const chapter of chapters) {
       const book = booksByKey.get(chapter.book_key);
-      if (!book || !book.chapters[chapter.chapter - 1]) {
-        throw new Error("A completed reading contains an unknown Bible chapter.");
-      }
+      if (!book || !book.chapters[chapter.chapter - 1]) continue;
       book.chapters[chapter.chapter - 1].reads += 1;
       totalChapterReads += 1;
     }
@@ -907,15 +1086,15 @@ async function readingStatistics() {
   }
 
   for (const reading of manualReadings) {
-    if (!validDateKey(reading.read_date)) throw new Error("A manually logged reading contains an invalid date.");
+    if (!validDateKey(reading.read_date)) continue;
     const selections = normalizeChapterSelections(formatChapterSelections(reading.chapter_selections));
     for (const selection of selections) {
       const bookKey = selection.book.toLowerCase() === "song of songs" ? "song of solomon" : selection.book.toLowerCase();
       const book = booksByKey.get(bookKey);
-      if (!book) throw new Error("A manually logged reading contains an unknown Bible book.");
+      if (!book) continue;
       for (let chapterNumber = selection.start; chapterNumber <= selection.end; chapterNumber += 1) {
         const chapter = book.chapters[chapterNumber - 1];
-        if (!chapter) throw new Error("A manually logged reading contains an unknown Bible chapter.");
+        if (!chapter) continue;
         chapter.reads += 1;
         totalChapterReads += 1;
       }
@@ -969,30 +1148,166 @@ async function readingStatistics() {
 
 async function saveBookReadingPlan(payload, id = "") {
   const user = await currentUser();
-  const values = { ...normalizeReadingPlan(payload), user_id: user.id };
+  const values = {
+    ...normalizeReadingPlan(payload),
+    user_id: user.id,
+    owner_email: user.email || null,
+  };
   const query = id
     ? supabase.from("study_reading_plans").update(values).eq("id", id).select("id").maybeSingle()
     : supabase.from("study_reading_plans").insert(values).select("id").single();
-  const { data, error } = await query;
+  let { data, error } = await query;
+  if (error && (error.message?.includes("column") || error.code === "42703")) {
+    const fallbackValues = {
+      user_id: user.id,
+      title: values.title,
+      books: values.books,
+      chapter_selections: values.chapter_selections,
+      chapters_per_reading: values.chapters_per_reading,
+      interval_days: values.interval_days || 1,
+      start_date: values.start_date,
+    };
+    const fallbackQuery = id
+      ? supabase.from("study_reading_plans").update(fallbackValues).eq("id", id).select("id").maybeSingle()
+      : supabase.from("study_reading_plans").insert(fallbackValues).select("id").single();
+    const fallbackResult = await fallbackQuery;
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
   if (error) return fail(error, "Could not save book reading plan");
   if (!data) throw new Error("Reading plan not found or you do not have permission to edit it.");
   return { id: data.id, status: id ? "updated" : "created" };
+}
+
+async function preserveCompletionsAsChapterReadings(plan, completions, userId) {
+  const totalChapters = totalChapterCount(plan);
+  const rowsToInsert = [];
+  for (const completion of completions) {
+    const offset = readingIndexForDate(plan, completion.scheduled_date);
+    if (offset < 0) continue;
+    const chapters = chaptersForOffset({ ...plan, total_chapters: totalChapters }, offset);
+    if (!chapters.length) continue;
+    const selections = groupChaptersToSelections(chapters);
+    const readDate = completion.scheduled_date || localDateKey(new Date(completion.completed_at));
+    rowsToInsert.push({
+      user_id: userId,
+      read_date: readDate,
+      chapter_selections: selections,
+    });
+  }
+  if (rowsToInsert.length > 0) {
+    const { error } = await supabase.from("study_chapter_readings").insert(rowsToInsert);
+    if (error) console.error("Could not archive completions to study_chapter_readings", error);
+  }
+}
+
+async function cancelBookReadingPlan(id) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid book reading plan.");
+  const user = await currentUser();
+  const { data: plan, error: planError } = await supabase.from("study_reading_plans")
+    .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,user_id,collaborator_email,owner_email")
+    .eq("id", id)
+    .maybeSingle();
+  if (planError) return fail(planError, "Could not load book reading plan");
+  if (!plan) throw new Error("Reading plan not found or you do not have permission to access it.");
+
+  const { data: completions, error: compError } = await supabase.from("study_reading_plan_completions")
+    .select("scheduled_date,completed_at")
+    .eq("plan_id", id);
+  if (compError) return fail(compError, "Could not load completions for plan");
+
+  // Always ensure read chapters are preserved in study_chapter_readings
+  if (completions?.length) {
+    await preserveCompletionsAsChapterReadings(plan, completions, user.id);
+  }
+
+  // Attempt to update status in DB
+  const { error: updateError } = await supabase.from("study_reading_plans")
+    .update({ status: "cancelled" })
+    .eq("id", id);
+
+  // Always persist local status override so it appears in Reading plan archive even if DB lacks status column
+  setLocalPlanStatus(user.id, id, "cancelled");
+
+  return { status: "cancelled", retained_readings: completions?.length || 0 };
+}
+
+async function continueBookReadingPlan(id, newStartDate = localDateKey()) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid book reading plan.");
+  if (!validDateKey(newStartDate)) throw new Error("Enter a valid start date (YYYY-MM-DD).");
+  const user = await currentUser();
+
+  const { data: plan, error: planError } = await supabase.from("study_reading_plans")
+    .select("id,title,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,user_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (planError) return fail(planError, "Could not load book reading plan");
+  if (!plan) throw new Error("Reading plan not found.");
+
+  const { data: completions } = await supabase.from("study_reading_plan_completions")
+    .select("scheduled_date,completed_at")
+    .eq("plan_id", id);
+
+  const completedCount = completions?.length || 0;
+
+  // Make sure previous completed readings are archived in study_chapter_readings
+  if (completions?.length) {
+    await preserveCompletionsAsChapterReadings(plan, completions, user.id);
+  }
+
+  // Calculate adjusted start_date so the next unread reading (reading #completedCount)
+  // is scheduled on newStartDate
+  let adjustedStartDate = newStartDate;
+  if (completedCount > 0) {
+    if (plan.cadence_type === "weekdays" && Array.isArray(plan.weekdays) && plan.weekdays.length > 0) {
+      let currentDay = dateDayNumber(newStartDate);
+      let stepsBack = 0;
+      for (let i = 0; i < 5000; i += 1) {
+        const dStr = dateFromDayNumber(currentDay - i);
+        const w = new Date(`${dStr}T12:00:00Z`).getUTCDay();
+        if (plan.weekdays.includes(w)) {
+          stepsBack += 1;
+          if (stepsBack === completedCount + 1) {
+            adjustedStartDate = dStr;
+            break;
+          }
+        }
+      }
+    } else {
+      const interval = plan.interval_days || 1;
+      adjustedStartDate = dateFromDayNumber(dateDayNumber(newStartDate) - completedCount * interval);
+    }
+  }
+
+  const { error: updateError } = await supabase.from("study_reading_plans")
+    .update({ status: "active", start_date: adjustedStartDate })
+    .eq("id", id);
+
+  if (updateError && (updateError.message?.includes("column") || updateError.code === "42703")) {
+    await supabase.from("study_reading_plans")
+      .update({ start_date: adjustedStartDate })
+      .eq("id", id);
+  }
+
+  // Update local plan status to active
+  setLocalPlanStatus(user.id, id, "active");
+
+  return { status: "active", plan_id: id, start_date: adjustedStartDate };
 }
 
 async function toggleBookReading(planId, date) {
   if (!UUID_PATTERN.test(planId) || !validDateKey(date)) throw new Error("Invalid book reading completion.");
   const user = await currentUser();
   const { data: plan, error: planError } = await supabase.from("study_reading_plans")
-    .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date")
+    .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,user_id,collaborator_email,owner_email")
     .eq("id", planId)
     .maybeSingle();
   if (planError) return fail(planError, "Could not load book reading plan");
   if (!plan) throw new Error("Reading plan not found or you do not have permission to access it.");
   const totalChapters = totalChapterCount(plan);
-  const daysSinceStart = dateDayNumber(date) - dateDayNumber(plan.start_date);
-  const readingIndex = daysSinceStart / plan.interval_days;
-  if (daysSinceStart < 0 || !Number.isInteger(readingIndex)
-    || !readingForOffset({ ...plan, total_chapters: totalChapters }, readingIndex)) {
+  const totalReadings = Math.ceil(totalChapters / plan.chapters_per_reading);
+  const readingIndex = readingIndexForDate(plan, date);
+  if (readingIndex < 0 || readingIndex >= totalReadings) {
     throw new Error("There is no reading scheduled for this plan on that date.");
   }
   const { data: existing, error: findError } = await supabase.from("study_reading_plan_completions")
@@ -1032,8 +1347,28 @@ async function saveChapterReading(payload) {
   };
 }
 
-async function deleteBookReadingPlan(id) {
+async function deleteBookReadingPlan(id, options = {}) {
   if (!UUID_PATTERN.test(id)) throw new Error("Invalid book reading plan.");
+  const user = await currentUser();
+  const { retainChapters = true } = options;
+
+  if (retainChapters) {
+    const { data: plan } = await supabase.from("study_reading_plans")
+      .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,user_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (plan) {
+      const { data: completions } = await supabase.from("study_reading_plan_completions")
+        .select("scheduled_date,completed_at")
+        .eq("plan_id", id);
+
+      if (completions?.length) {
+        await preserveCompletionsAsChapterReadings(plan, completions, user.id);
+      }
+    }
+  }
+
   const { data, error } = await supabase.from("study_reading_plans").delete().eq("id", id).select("id");
   if (error) return fail(error, "Could not delete book reading plan");
   if (!data?.length) throw new Error("Reading plan not found or you do not have permission to delete it.");
@@ -1218,9 +1553,16 @@ export async function apiRequest(url, options = {}) {
   if (path === "/api/tasks" && method === "POST") return saveTask(JSON.parse(options.body));
   const bookPlanToggle = path.match(/^\/api\/book-reading-plans\/([0-9a-f-]+)\/toggle$/i);
   if (bookPlanToggle && method === "POST") return toggleBookReading(bookPlanToggle[1], parsed.searchParams.get("date") || "");
+  const bookPlanCancel = path.match(/^\/api\/book-reading-plans\/([0-9a-f-]+)\/cancel$/i);
+  if (bookPlanCancel && method === "POST") return cancelBookReadingPlan(bookPlanCancel[1]);
+  const bookPlanContinue = path.match(/^\/api\/book-reading-plans\/([0-9a-f-]+)\/continue$/i);
+  if (bookPlanContinue && method === "POST") {
+    const body = options.body ? JSON.parse(options.body) : {};
+    return continueBookReadingPlan(bookPlanContinue[1], body.start_date);
+  }
   const bookPlan = path.match(/^\/api\/book-reading-plans\/([0-9a-f-]+)$/i);
   if (bookPlan && method === "PUT") return saveBookReadingPlan(JSON.parse(options.body), bookPlan[1]);
-  if (bookPlan && method === "DELETE") return deleteBookReadingPlan(bookPlan[1]);
+  if (bookPlan && method === "DELETE") return deleteBookReadingPlan(bookPlan[1], { retainChapters: parsed.searchParams.get("retain_chapters") === "true" });
   const taskToggle = path.match(/^\/api\/tasks\/([0-9a-f-]+)\/toggle$/i);
   if (taskToggle && method === "POST") return toggleTask(taskToggle[1], parsed.searchParams.get("date") || "");
   const task = path.match(/^\/api\/tasks\/([0-9a-f-]+)$/i);

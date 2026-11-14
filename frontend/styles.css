@@ -209,6 +209,15 @@ code { color: var(--accent); font-size: .95em; }
 .completed-plans-count { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 400; }
 .completed-reading-plans .book-plan-list { margin-top: 14px; }
 .completed-reading-plans .empty-state { margin: 14px 0 0; }
+/* --- Continue Plan Dialog --- */
+.continue-plan-dialog { padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); max-width: 440px; width: calc(100% - 32px); box-shadow: 0 16px 40px rgba(0, 0, 0, .5); }
+.continue-plan-dialog::backdrop { background: rgba(10, 14, 20, .75); backdrop-filter: blur(2px); }
+.continue-plan-form { padding: 22px; display: grid; gap: 14px; }
+.continue-plan-form h3 { margin: 0; font-size: 17px; font-family: Georgia, ui-serif, serif; color: var(--text); }
+.continue-plan-form label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.continue-plan-form input[type="date"] { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #131923; color: var(--text); font-size: 12px; }
+.continue-plan-form input[type="date"]:focus { border-color: rgba(201, 168, 117, .65); outline: none; }
+.continue-plan-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
 /* --- Today controls, reading plans, and task checklists --- */
 .today-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .book-plans-card .panel-heading { align-items: center; margin-bottom: 14px; }
@@ -226,6 +235,23 @@ code { color: var(--accent); font-size: .95em; }
 .book-plan-form input, .book-plan-form select { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #131923; color: var(--text); }
 .book-plan-form label small { color: var(--quiet); font-size: 10px; line-height: 1.5; }
 .book-plan-form-actions { display: flex; align-items: end; gap: 8px; }
+.book-plan-partner-field { grid-column: 1 / -1; }
+.book-plan-days { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.book-plan-days legend { padding: 0 5px; color: var(--muted); font-size: 11px; }
+.book-plan-days label { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 11px; cursor: pointer; }
+.book-plan-days input { accent-color: var(--green); }
+.day-quick-selects { display: flex; gap: 6px; margin-left: auto; }
+.day-quick-selects .button { min-height: 24px; padding: 0 8px; font-size: 10px; }
+.book-plan-preview { grid-column: 1 / -1; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(19, 25, 35, .6); }
+.book-plan-preview .eyebrow { margin: 0 0 4px; font-size: 10px; color: var(--accent); }
+.book-plan-preview-content p { margin: 0; font-size: 12px; }
+.book-plan-preview-content .muted { margin-top: 4px; font-size: 11px; color: var(--muted); }
+.plan-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; margin-top: 6px; border-radius: 4px; font-size: 10px; font-weight: 500; width: fit-content; }
+.plan-badge.shared { background: rgba(86, 156, 214, .15); border: 1px solid rgba(86, 156, 214, .35); color: #79c0ff; }
+.plan-badge.cancelled { background: rgba(229, 154, 143, .15); border: 1px solid rgba(229, 154, 143, .35); color: var(--danger); }
+.plan-badge.completed { background: rgba(129, 182, 155, .15); border: 1px solid rgba(129, 182, 155, .35); color: var(--green); }
+.button-warning { border-color: rgba(201, 168, 117, .4); color: var(--accent); }
+.button-warning:hover { background: rgba(201, 168, 117, .12); }
 .book-plan-edit-warning { grid-column: 1 / -1; margin: 0; font-size: 10px; }
 .book-plan-date-hint { margin: 0 0 12px; font-size: 11px; }
 .book-plan-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }

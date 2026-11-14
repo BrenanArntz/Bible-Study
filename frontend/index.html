@@ -94,11 +94,26 @@
         <!-- Completed reading plan archive -->
         <details class="panel-card completed-reading-plans">
           <summary>
-            <span>Completed reading plans</span>
+            <span>Reading plan archive</span>
             <span class="completed-plans-count" id="completed-plans-count">Loading…</span>
           </summary>
           <p class="empty-state" id="completed-plans-empty" hidden></p>
           <ul class="book-plan-list" id="completed-plans-list" aria-live="polite"></ul>
+          <!-- Continue Canceled Reading Plan Modal -->
+          <dialog id="continue-plan-dialog" class="continue-plan-dialog">
+            <form id="continue-plan-form" method="dialog" class="continue-plan-form">
+              <h3 id="continue-plan-title">Continue reading plan</h3>
+              <p class="muted" id="continue-plan-scope"></p>
+              <label for="continue-plan-date">Start reading again on
+                <input type="date" id="continue-plan-date" required>
+                <small class="muted">Your next unread reading will be scheduled starting on this date.</small>
+              </label>
+              <div class="continue-plan-actions">
+                <button type="submit" class="button button-primary" id="continue-plan-submit">Continue plan</button>
+                <button type="button" class="button button-quiet" id="continue-plan-close">Cancel</button>
+              </div>
+            </form>
+          </dialog>
         </details>
 
         <!-- Search and filter across notes -->
@@ -317,7 +332,7 @@
             <div class="panel-heading"><div><p class="eyebrow">RECURRING ROUTINE</p><h2>Task settings</h2></div></div>
             <form id="today-task-form" class="task-settings-form">
               <input id="task-edit-id" type="hidden">
-              <label>Task type<select id="task-type"><option value="verse-quiz">Verse Quiz</option><option value="greek">Reviewing Greek</option><option value="church-history">Church History Study</option><option value="other">Other</option><optgroup label="Existing reading tasks"><option value="personal-reading" disabled>Personal Reading</option><option value="reading-with-haley" disabled>Reading with Haley</option></optgroup></select></label>
+              <label>Task type<select id="task-type"><option value="verse-quiz">Verse Quiz</option><option value="greek">Reviewing Greek</option><option value="church-history">Church History Study</option><option value="other">Other</option></select></label>
               <label>Task name<input id="task-title" maxlength="120" required placeholder="e.g. John 3:1–21"></label>
               <label class="task-details-field">Details or verses<input id="task-details" maxlength="300" placeholder="Passage, verses, or study focus"></label>
               <fieldset class="task-days"><legend>Repeat on</legend>
@@ -349,8 +364,42 @@
               </div>
               <label id="book-plan-selections-field" hidden>Chapters to read<input id="book-plan-selections" placeholder="Genesis 4, 7-9; Exodus 2, 5"><small>Separate books with semicolons; list chapters or ranges with commas.</small></label>
               <label>Chapters per reading<input id="book-plan-chapters" type="number" min="1" max="50" value="2" required></label>
-              <label>Read every (days)<input id="book-plan-interval" type="number" min="1" max="365" value="1" required></label>
+              <label>Schedule recurrence
+                <select id="book-plan-cadence-type">
+                  <option value="interval">Every N days (Interval)</option>
+                  <option value="weekdays">Specific days of the week</option>
+                </select>
+              </label>
+              <div id="book-plan-interval-field">
+                <label>Read every (days)<input id="book-plan-interval" type="number" min="1" max="365" value="1" required></label>
+              </div>
+              <fieldset id="book-plan-weekdays-field" class="task-days book-plan-days" hidden>
+                <legend>Read on</legend>
+                <label><input type="checkbox" name="book-plan-day" value="0">Sun</label>
+                <label><input type="checkbox" name="book-plan-day" value="1">Mon</label>
+                <label><input type="checkbox" name="book-plan-day" value="2">Tue</label>
+                <label><input type="checkbox" name="book-plan-day" value="3">Wed</label>
+                <label><input type="checkbox" name="book-plan-day" value="4">Thu</label>
+                <label><input type="checkbox" name="book-plan-day" value="5">Fri</label>
+                <label><input type="checkbox" name="book-plan-day" value="6">Sat</label>
+                <div class="day-quick-selects">
+                  <button type="button" class="button button-quiet" id="book-plan-days-all">All</button>
+                  <button type="button" class="button button-quiet" id="book-plan-days-weekdays">Mon–Fri</button>
+                  <button type="button" class="button button-quiet" id="book-plan-days-weekends">Sat–Sun</button>
+                </div>
+              </fieldset>
               <label>Start date<input id="book-plan-start-date" type="date" required></label>
+              <label id="book-plan-partner-field" class="book-plan-partner-field">Partner account email (optional)
+                <input id="book-plan-partner-email" type="email" placeholder="e.g. partner@example.com" maxlength="255">
+                <small>Link this plan with another user. Either of you can view and check off readings.</small>
+              </label>
+              <div class="book-plan-preview panel-card" id="book-plan-preview">
+                <p class="eyebrow">PLAN PROJECTION</p>
+                <div class="book-plan-preview-content">
+                  <p id="book-plan-preview-summary">Select books or chapters above to preview schedule.</p>
+                  <p id="book-plan-preview-finish" class="muted"></p>
+                </div>
+              </div>
               <div class="book-plan-form-actions">
                 <button class="button button-primary" id="book-plan-save-button" type="submit">Create plan</button>
                 <button class="button button-quiet" id="book-plan-cancel" type="button">Cancel</button>
