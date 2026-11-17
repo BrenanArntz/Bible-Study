@@ -44,7 +44,7 @@
       <div class="vault-status">
         <span class="status-dot"></span>
         <span id="signed-in-email">Supabase</span>
-        <button class="button button-quiet" id="signout-button" type="button" hidden>Sign out</button>
+        <a class="nav-link account-nav-link" href="#account" data-view="account">Account</a>
       </div>
     </header>
 
@@ -71,7 +71,7 @@
         <div class="page-heading">
           <div>
             <p class="eyebrow">YOUR STUDY SPACE</p>
-            <h1>Good morning, reader.</h1>
+            <h1 id="library-greeting">Good morning, reader.</h1>
             <p class="subheading">A quiet place to read closely, make connections, and keep your notes.</p>
           </div>
           <div class="note-actions">
@@ -335,11 +335,31 @@
               <label>Task type<select id="task-type"><option value="verse-quiz">Verse Quiz</option><option value="greek">Reviewing Greek</option><option value="church-history">Church History Study</option><option value="other">Other</option></select></label>
               <label>Task name<input id="task-title" maxlength="120" required placeholder="e.g. John 3:1–21"></label>
               <label class="task-details-field">Details or verses<input id="task-details" maxlength="300" placeholder="Passage, verses, or study focus"></label>
-              <fieldset class="task-days"><legend>Repeat on</legend>
+              <label>Schedule recurrence
+                <select id="task-cadence-type">
+                  <option value="interval">Every N days (Interval)</option>
+                  <option value="weekdays">Specific days of the week</option>
+                </select>
+              </label>
+              <div id="task-interval-field">
+                <label>Repeat every (days)<input id="task-interval" type="number" min="1" max="365" value="1" required></label>
+              </div>
+              <fieldset id="task-weekdays-field" class="task-days" hidden><legend>Repeat on</legend>
                 <label><input type="checkbox" name="task-day" value="0">Sun</label><label><input type="checkbox" name="task-day" value="1">Mon</label><label><input type="checkbox" name="task-day" value="2">Tue</label><label><input type="checkbox" name="task-day" value="3">Wed</label><label><input type="checkbox" name="task-day" value="4">Thu</label><label><input type="checkbox" name="task-day" value="5">Fri</label><label><input type="checkbox" name="task-day" value="6">Sat</label>
+                <div class="day-quick-selects">
+                  <button type="button" class="button button-quiet" id="task-days-all">All</button>
+                  <button type="button" class="button button-quiet" id="task-days-weekdays">Mon–Fri</button>
+                  <button type="button" class="button button-quiet" id="task-days-weekends">Sat–Sun</button>
+                </div>
               </fieldset>
+              <label>Start date<input id="task-start-date" type="date" required></label>
+              <div class="book-plan-preview panel-card task-preview" id="task-preview">
+                <p class="eyebrow">SCHEDULE PREVIEW</p>
+                <p id="task-preview-summary">Choose a recurrence to preview the task schedule.</p>
+              </div>
               <div class="task-form-actions"><button class="button button-primary" type="submit" id="task-save-button">Add recurring task</button><button class="button button-quiet" type="button" id="task-cancel-edit" hidden>Cancel edit</button></div>
             </form>
+            <p class="muted task-settings-hint">Check off tasks scheduled for the selected Schedule date.</p>
             <ul id="task-settings-list" class="task-settings-list"></ul>
           </section>
 
@@ -484,6 +504,33 @@
               <p class="muted">Expand a book to see how many times each chapter was logged or checked off.</p>
             </div>
             <div class="stats-book-list" id="stats-book-list"></div>
+          </section>
+        </section>
+
+        <section id="account-view" class="workspace-view" aria-labelledby="account-title" hidden>
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">YOUR ACCOUNT</p>
+              <h1 id="account-title">Account</h1>
+              <p class="subheading">Set the name shown for your authorized account.</p>
+            </div>
+          </div>
+          <section class="panel-card account-card" aria-labelledby="account-profile-title">
+            <div class="panel-heading">
+              <div><p class="eyebrow">PROFILE</p><h2 id="account-profile-title">Display name</h2></div>
+            </div>
+            <p class="muted account-email" id="account-email"></p>
+            <form id="account-form" class="account-form">
+              <label for="account-name">Name
+                <input id="account-name" name="display_name" type="text" maxlength="80" autocomplete="name" required>
+              </label>
+              <button class="button button-primary" id="account-save-button" type="submit">Save name</button>
+              <p class="auth-message" id="account-message" role="status" aria-live="polite"></p>
+            </form>
+            <div class="account-session-actions">
+              <h2>Session</h2>
+              <button class="button button-danger" id="signout-button" type="button">Sign out</button>
+            </div>
           </section>
         </section>
       </div>

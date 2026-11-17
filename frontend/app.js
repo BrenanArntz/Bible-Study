@@ -29,6 +29,7 @@ const state = {
   heightResize: null,
   userId: null,
   userEmail: null,
+  displayName: null,
   bookPlanOriginal: null,
   selectedBookPlanBooks: [],
   // pending plan to continue from archive
@@ -41,6 +42,8 @@ const elements = {
   libraryView: document.querySelector("#library-view"),
   todayView: document.querySelector("#today-view"),
   statsView: document.querySelector("#stats-view"),
+  accountView: document.querySelector("#account-view"),
+  libraryGreeting: document.querySelector("#library-greeting"),
   statsRefreshButton: document.querySelector("#stats-refresh-button"),
   statsStatus: document.querySelector("#stats-status"),
   statsSummary: document.querySelector("#stats-summary"),
@@ -105,6 +108,11 @@ const elements = {
   authPassword: document.querySelector("#auth-password"),
   authMessage: document.querySelector("#auth-message"),
   signedInEmail: document.querySelector("#signed-in-email"),
+  accountForm: document.querySelector("#account-form"),
+  accountName: document.querySelector("#account-name"),
+  accountEmail: document.querySelector("#account-email"),
+  accountMessage: document.querySelector("#account-message"),
+  accountSaveButton: document.querySelector("#account-save-button"),
   signoutButton: document.querySelector("#signout-button"),
   taskSettingsButton: document.querySelector("#today-task-settings-button"),
   taskSettings: document.querySelector("#today-task-settings"),
@@ -113,6 +121,15 @@ const elements = {
   taskType: document.querySelector("#task-type"),
   taskTitle: document.querySelector("#task-title"),
   taskDetails: document.querySelector("#task-details"),
+  taskCadenceType: document.querySelector("#task-cadence-type"),
+  taskInterval: document.querySelector("#task-interval"),
+  taskIntervalField: document.querySelector("#task-interval-field"),
+  taskWeekdaysField: document.querySelector("#task-weekdays-field"),
+  taskStartDate: document.querySelector("#task-start-date"),
+  taskPreviewSummary: document.querySelector("#task-preview-summary"),
+  taskDaysAll: document.querySelector("#task-days-all"),
+  taskDaysWeekdays: document.querySelector("#task-days-weekdays"),
+  taskDaysWeekends: document.querySelector("#task-days-weekends"),
   taskSaveButton: document.querySelector("#task-save-button"),
   taskCancelEdit: document.querySelector("#task-cancel-edit"),
   taskSettingsList: document.querySelector("#task-settings-list"),
@@ -175,6 +192,31 @@ elements.authForm.addEventListener("submit", async (event) => {
     elements.authMessage.textContent = "Signed in.";
   } catch (error) {
     elements.authMessage.textContent = error.message;
+  }
+});
+
+elements.accountForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const displayName = elements.accountName.value.trim();
+  if (!displayName || displayName.length > 80) {
+    elements.accountMessage.textContent = "Enter a name between 1 and 80 characters.";
+    return;
+  }
+  elements.accountSaveButton.disabled = true;
+  elements.accountMessage.textContent = "Saving your name…";
+  try {
+    if (!state.userId) throw new Error("Sign in to update your account name.");
+    const { data, error } = await supabase.from("study_user_profiles")
+      .upsert({ user_id: state.userId, display_name: displayName }, { onConflict: "user_id" })
+      .select("display_name")
+      .single();
+    if (error) throw error;
+    syncAccountProfile(data.display_name, state.userEmail);
+    elements.accountMessage.textContent = "Your account name was saved.";
+  } catch (error) {
+    elements.accountMessage.textContent = `Could not save your name: ${error.message}`;
+  } finally {
+    elements.accountSaveButton.disabled = false;
   }
 });
 
@@ -1688,10 +1730,23 @@ function renderTaskSettings(tasks) {
   elements.taskSettingsList.replaceChildren();
   tasks.forEach((task) => {
     const row = document.createElement("li");
-    const description = document.createElement("span");
-    const days = task.weekdays.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
-    description.textContent = `${taskTypeLabels[task.task_type] || "Task"}: ${task.title} · ${days}`;
-    row.append(description);
+    row.className = "task-setting-item";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = task.completed;
+    checkbox.disabled = !task.scheduled;
+    checkbox.id = `task-setting-${task.id}`;
+    checkbox.setAttribute("aria-label", `Mark ${task.title} complete for ${formatDate(getSelectedScheduleDate())}`);
+    if (task.scheduled) checkbox.addEventListener("change", () => toggleTaskCompletion(task.id));
+    const description = document.createElement("label");
+    description.htmlFor = checkbox.id;
+    description.className = "task-setting-description";
+    const title = document.createElement("strong");
+    title.textContent = `${taskTypeLabels[task.task_type] || "Task"}: ${task.title}`;
+    const schedule = document.createElement("span");
+    schedule.textContent = `${formatCadence(task)} · Starts ${formatDate(task.start_date)}`;
+    description.append(title, schedule);
+    row.append(checkbox, description);
     const edit = document.createElement("button");
     edit.type = "button"; edit.className = "button button-quiet"; edit.textContent = "Edit";
     edit.addEventListener("click", () => editRecurringTask(task));
@@ -1706,8 +1761,13 @@ function renderTaskSettings(tasks) {
 function resetTaskForm() {
   elements.taskForm.reset();
   elements.taskEditId.value = "";
+  elements.taskCadenceType.value = "interval";
+  elements.taskInterval.value = "1";
+  elements.taskStartDate.value = getSelectedScheduleDate();
+  document.querySelectorAll('input[name="task-day"]').forEach((checkbox) => { checkbox.checked = false; });
   elements.taskSaveButton.textContent = "Add recurring task";
   elements.taskCancelEdit.hidden = true;
+  updateTaskCadenceUI();
 }
 
 function editRecurringTask(task) {
@@ -1715,10 +1775,44 @@ function editRecurringTask(task) {
   elements.taskType.value = task.task_type;
   elements.taskTitle.value = task.title;
   elements.taskDetails.value = task.details || "";
-  document.querySelectorAll('input[name="task-day"]').forEach((checkbox) => { checkbox.checked = task.weekdays.includes(Number(checkbox.value)); });
+  elements.taskCadenceType.value = task.cadence_type || "weekdays";
+  elements.taskInterval.value = task.interval_days || 1;
+  elements.taskStartDate.value = task.start_date || getSelectedScheduleDate();
+  document.querySelectorAll('input[name="task-day"]').forEach((checkbox) => {
+    checkbox.checked = Array.isArray(task.weekdays) && task.weekdays.includes(Number(checkbox.value));
+  });
   elements.taskSaveButton.textContent = "Save changes";
   elements.taskCancelEdit.hidden = false;
+  updateTaskCadenceUI();
   elements.taskTitle.focus();
+}
+
+function updateTaskCadenceUI() {
+  const isWeekdays = elements.taskCadenceType.value === "weekdays";
+  elements.taskIntervalField.hidden = isWeekdays;
+  elements.taskInterval.required = !isWeekdays;
+  elements.taskWeekdaysField.hidden = !isWeekdays;
+  updateTaskPreview();
+}
+
+function updateTaskPreview() {
+  const cadenceType = elements.taskCadenceType.value;
+  const weekdays = [...document.querySelectorAll('input[name="task-day"]:checked')]
+    .map((checkbox) => Number(checkbox.value))
+    .sort((left, right) => left - right);
+  if (cadenceType === "weekdays" && !weekdays.length) {
+    elements.taskPreviewSummary.textContent = "Select at least one weekday to preview the task schedule.";
+    return;
+  }
+  const startDate = elements.taskStartDate.value || getSelectedScheduleDate();
+  const task = {
+    cadence_type: cadenceType,
+    interval_days: Math.max(1, Number(elements.taskInterval.value) || 1),
+    weekdays,
+    start_date: startDate,
+  };
+  const firstDate = scheduledDateForIndex(task, 0);
+  elements.taskPreviewSummary.textContent = `Repeats ${formatCadence(task)}, starting ${formatDate(firstDate)}.`;
 }
 
 async function toggleTaskCompletion(id) {
@@ -1744,7 +1838,10 @@ async function saveRecurringTask(event) {
     task_type: elements.taskType.value,
     title: elements.taskTitle.value,
     details: elements.taskDetails.value,
+    cadence_type: elements.taskCadenceType.value,
+    interval_days: Number(elements.taskInterval.value),
     weekdays: [...document.querySelectorAll('input[name="task-day"]:checked')].map((checkbox) => Number(checkbox.value)),
+    start_date: elements.taskStartDate.value,
   };
   try {
     await requestJson(id ? `/api/tasks/${id}` : "/api/tasks", {
@@ -1808,7 +1905,7 @@ function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlan
   elements.bookPlanTodayEmpty.textContent = plans.length
     ? `No readings scheduled for ${formatDate(date)}.`
     : completedPlans.length
-      ? "All book reading plans are complete. View them in the Library."
+      ? "All book reading plans are complete. View them in the Library archive."
       : "No book reading plans yet. Use Book plan settings to create one.";
 
   const next = plans
@@ -1840,7 +1937,7 @@ function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlan
 function renderBookPlanSettings(plans) {
   elements.bookPlanList.replaceChildren();
   elements.bookPlansEmpty.hidden = plans.length > 0;
-  elements.bookPlansEmpty.textContent = "No active book reading plans. Create one here, or view completed plans in the Library.";
+  elements.bookPlansEmpty.textContent = "No active book reading plans. Create one here, or view archived plans in the Library.";
   plans.forEach((plan) => {
     const row = document.createElement("li");
     row.className = "book-plan-item";
@@ -1875,19 +1972,13 @@ function renderBookPlanSettings(plans) {
     edit.textContent = "Edit";
     edit.addEventListener("click", () => editBookReadingPlan(plan));
 
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "button button-quiet button-warning";
-    cancel.textContent = "Cancel plan";
-    cancel.title = "Cancel this plan early while retaining all chapters you have read";
-    cancel.addEventListener("click", () => cancelBookPlan(plan));
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "button button-danger";
-    remove.textContent = "Delete";
-    remove.addEventListener("click", () => deleteBookReadingPlan(plan));
-    actions.append(edit, cancel, remove);
+    const archive = document.createElement("button");
+    archive.type = "button";
+    archive.className = "button button-quiet button-warning";
+    archive.textContent = "Archive";
+    archive.title = "Move this plan to the reading plan archive";
+    archive.addEventListener("click", () => archiveBookPlan(plan));
+    actions.append(edit, archive);
     row.append(details, actions);
     elements.bookPlanList.append(row);
   });
@@ -1897,7 +1988,7 @@ function renderCompletedReadingPlans(plans, error = "", cancelledPlans = []) {
   const totalCount = (plans?.length || 0) + (cancelledPlans?.length || 0);
   elements.completedPlansCount.textContent = error ? "Unavailable" : totalCount.toLocaleString();
   elements.completedPlansEmpty.hidden = totalCount > 0 && !error;
-  elements.completedPlansEmpty.textContent = error || "No completed or cancelled reading plans yet.";
+  elements.completedPlansEmpty.textContent = error || "No archived reading plans yet.";
   elements.completedPlansList.replaceChildren();
 
   plans.forEach((plan) => {
@@ -1917,7 +2008,15 @@ function renderCompletedReadingPlans(plans, error = "", cancelledPlans = []) {
     badge.className = "plan-badge completed";
     badge.textContent = "Completed";
     details.append(title, scope, progress, badge);
-    row.append(details);
+    const actions = document.createElement("div");
+    actions.className = "book-plan-actions";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "button button-danger";
+    remove.textContent = "Delete";
+    remove.addEventListener("click", () => deleteBookReadingPlan(plan));
+    actions.append(remove);
+    row.append(details, actions);
     elements.completedPlansList.append(row);
   });
 
@@ -1934,10 +2033,10 @@ function renderCompletedReadingPlans(plans, error = "", cancelledPlans = []) {
     const progress = document.createElement("p");
     progress.className = "book-plan-progress muted";
     const chaptersRead = Math.min(plan.total_chapters, plan.completed_readings * plan.chapters_per_reading);
-    progress.textContent = `Cancelled · Retained ${plan.completed_readings} of ${plan.total_readings} readings (${chaptersRead} chapters read)`;
+    progress.textContent = `Archived · ${plan.completed_readings} of ${plan.total_readings} readings completed (${chaptersRead} chapters)`;
     const badge = document.createElement("span");
     badge.className = "plan-badge cancelled";
-    badge.textContent = "Cancelled";
+    badge.textContent = "Archived";
     details.append(title, scope, progress, badge);
 
     const actions = document.createElement("div");
@@ -1946,7 +2045,7 @@ function renderCompletedReadingPlans(plans, error = "", cancelledPlans = []) {
     continueBtn.type = "button";
     continueBtn.className = "button button-quiet";
     continueBtn.textContent = "Continue plan";
-    continueBtn.title = "Resume this cancelled plan from where you left off";
+    continueBtn.title = "Resume this archived plan from where you left off";
     continueBtn.addEventListener("click", () => promptContinueBookPlan(plan));
     const remove = document.createElement("button");
     remove.type = "button";
@@ -2256,10 +2355,13 @@ async function saveQuickChapterReading(event) {
     const result = await requestJson("/api/chapter-readings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chapter_selections: elements.quickReadingSelections.value }),
+      body: JSON.stringify({
+        chapter_selections: elements.quickReadingSelections.value,
+        read_date: getSelectedScheduleDate(),
+      }),
     });
     elements.quickReadingForm.reset();
-    showToast(`Logged ${result.reference} for today.`);
+    showToast(`Logged ${result.reference} for ${formatDate(result.read_date)}.`);
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -2267,39 +2369,26 @@ async function saveQuickChapterReading(event) {
   }
 }
 
-async function cancelBookPlan(plan) {
-  const completedText = plan.completed_readings > 0
-    ? `Any chapters you have already read (${plan.completed_readings} completed readings) will be retained in your reading logs and statistics.`
-    : "No readings have been completed yet.";
-  if (!window.confirm(`Cancel reading plan “${plan.title}”?\n\n${completedText}\nThe plan will be archived and removed from your daily checklist.`)) {
+async function archiveBookPlan(plan) {
+  if (!window.confirm(`Archive reading plan “${plan.title}”?\n\nIt will be removed from your daily checklist and kept in the reading plan archive.`)) {
     return;
   }
   try {
     await requestJson(`/api/book-reading-plans/${plan.id}/cancel`, { method: "POST" });
     if (elements.bookPlanEditId.value === plan.id) resetBookPlanForm();
     await loadBookReadingPlans();
-    showToast("Book reading plan cancelled. Completed chapters were retained.");
+    showToast("Book reading plan archived.");
   } catch (error) {
     showToast(error.message, true);
   }
 }
 
 async function deleteBookReadingPlan(plan) {
-  let retain = true;
-  if (plan.completed_readings > 0) {
-    const choice = window.confirm(
-      `Delete book reading plan “${plan.title}”?\n\nClick OK to delete the plan while keeping your ${plan.completed_readings} completed readings in your history.\n\nClick Cancel to abort.`
-    );
-    if (!choice) return;
-  } else {
-    if (!window.confirm(`Delete book reading plan “${plan.title}”?`)) return;
-    retain = false;
-  }
+  if (!window.confirm(`Permanently delete archived reading plan “${plan.title}” and its completion history?`)) return;
   try {
-    await requestJson(`/api/book-reading-plans/${plan.id}?retain_chapters=${retain}`, { method: "DELETE" });
-    if (elements.bookPlanEditId.value === plan.id) resetBookPlanForm();
+    await requestJson(`/api/book-reading-plans/${plan.id}`, { method: "DELETE" });
     await loadBookReadingPlans();
-    showToast(retain && plan.completed_readings > 0 ? "Plan deleted; read chapters retained in your stats." : "Book reading plan deleted.");
+    showToast("Archived reading plan deleted.");
   } catch (error) {
     showToast(error.message, true);
   }
@@ -2336,7 +2425,7 @@ function renderReadingStatistics(stats) {
     "Distinct chapters logged or checked off in Today",
   );
   appendStatCard("BOOKS COMPLETED", `${stats.completed_books} / ${stats.books.length}`, "Every chapter read at least once");
-  appendStatCard("READING DAYS", stats.reading_days.toLocaleString(), `${stats.completed_readings.toLocaleString()} completed readings`);
+  appendStatCard("READING DAYS", stats.reading_days.toLocaleString(), "Days with at least one chapter read");
   appendStatCard(
     "CURRENT STREAK",
     `${stats.reading_streak.toLocaleString()} ${stats.reading_streak === 1 ? "day" : "days"}`,
@@ -2421,11 +2510,12 @@ async function loadReadingStatistics() {
 
 // --- View switching and Bible passage lookup ---
 function setActiveView(view) {
-  state.activeView = view === "today" || view === "stats" ? view : "library";
+  state.activeView = ["today", "stats", "account"].includes(view) ? view : "library";
   const showingToday = state.activeView === "today";
   elements.libraryView.hidden = state.activeView !== "library";
   elements.todayView.hidden = !showingToday;
   elements.statsView.hidden = state.activeView !== "stats";
+  elements.accountView.hidden = state.activeView !== "account";
   elements.navLinks.forEach((link) => {
     const active = link.dataset.view === state.activeView;
     link.classList.toggle("active", active);
@@ -2529,6 +2619,8 @@ elements.todayRefreshButton.addEventListener("click", loadReadingPlan);
 elements.quickReadingForm.addEventListener("submit", saveQuickChapterReading);
 setSelectedScheduleDate(localDateKey());
 elements.bookPlanStartDate.value = localDateKey();
+elements.taskStartDate.value = localDateKey();
+updateTaskCadenceUI();
 if (elements.scheduleDate) {
   elements.scheduleDate.addEventListener("change", () => {
     setSelectedScheduleDate(elements.scheduleDate.value);
@@ -2603,6 +2695,28 @@ elements.taskSettingsButton.addEventListener("click", () => {
 });
 elements.taskForm.addEventListener("submit", saveRecurringTask);
 elements.taskCancelEdit.addEventListener("click", resetTaskForm);
+elements.taskCadenceType.addEventListener("change", updateTaskCadenceUI);
+elements.taskInterval.addEventListener("input", updateTaskPreview);
+elements.taskStartDate.addEventListener("input", updateTaskPreview);
+document.querySelectorAll('input[name="task-day"]').forEach((checkbox) => {
+  checkbox.addEventListener("change", updateTaskPreview);
+});
+elements.taskDaysAll.addEventListener("click", () => {
+  document.querySelectorAll('input[name="task-day"]').forEach((checkbox) => { checkbox.checked = true; });
+  updateTaskPreview();
+});
+elements.taskDaysWeekdays.addEventListener("click", () => {
+  document.querySelectorAll('input[name="task-day"]').forEach((checkbox) => {
+    checkbox.checked = [1, 2, 3, 4, 5].includes(Number(checkbox.value));
+  });
+  updateTaskPreview();
+});
+elements.taskDaysWeekends.addEventListener("click", () => {
+  document.querySelectorAll('input[name="task-day"]').forEach((checkbox) => {
+    checkbox.checked = [0, 6].includes(Number(checkbox.value));
+  });
+  updateTaskPreview();
+});
 elements.formattingToolbar.addEventListener("mousedown", (event) => {
   rememberEditorSelection();
   if (event.target instanceof Element && event.target.closest("button")) event.preventDefault();
@@ -2691,7 +2805,8 @@ elements.navLinks.forEach((link) => {
 window.addEventListener("popstate", () => {
   const targetView = !window.location.hash || window.location.hash === "#today"
     ? "today"
-    : window.location.hash === "#stats" ? "stats" : "library";
+    : window.location.hash === "#stats" ? "stats"
+      : window.location.hash === "#account" ? "account" : "library";
   setActiveView(targetView);
   if (targetView === "today") loadReadingPlan();
   if (targetView === "stats") loadReadingStatistics();
@@ -2703,7 +2818,8 @@ elements.statsRefreshButton.addEventListener("click", loadReadingStatistics);
 // --- Initial route and authenticated-session lifecycle ---
 const initialView = !window.location.hash || window.location.hash === "#today"
   ? "today"
-  : window.location.hash === "#stats" ? "stats" : "library";
+  : window.location.hash === "#stats" ? "stats"
+    : window.location.hash === "#account" ? "account" : "library";
 if (!window.location.hash) {
   window.history.replaceState(null, "", "#today");
 }
@@ -2713,24 +2829,67 @@ async function showSession(session) {
   const authenticated = Boolean(session?.user);
   elements.authPanel.hidden = authenticated;
   elements.appShell.hidden = !authenticated;
-  elements.signoutButton.hidden = !authenticated;
-  elements.signedInEmail.textContent = authenticated ? session.user.email || "Signed in" : "Supabase";
   if (!authenticated) {
     clearSignedOutState();
+    elements.signedInEmail.textContent = "Supabase";
+    elements.signedInEmail.removeAttribute("title");
     return;
   }
-  state.userEmail = session.user.email || null;
-  if (state.userId && state.userId !== session.user.id) clearSignedOutState();
-  if (state.userId === session.user.id) return;
+  const userChanged = state.userId !== session.user.id;
+  if (state.userId && userChanged) clearSignedOutState();
   state.userId = session.user.id;
-  const requests = [loadVault(), loadReadingPlan()];
+  state.userEmail = session.user.email || null;
+  if (!userChanged) return;
+  elements.accountName.value = "";
+  elements.accountEmail.textContent = state.userEmail || "Email unavailable";
+  elements.accountMessage.textContent = "Loading your account name…";
+  elements.signedInEmail.textContent = state.userEmail || "Signed in";
+  if (state.userEmail) elements.signedInEmail.title = state.userEmail;
+  const requests = [loadVault(), loadReadingPlan(), loadAccountProfile(session.user)];
   if (state.activeView === "stats") requests.push(loadReadingStatistics());
   await Promise.all(requests);
+}
+
+async function loadAccountProfile(user) {
+  const { data, error } = await supabase.from("study_user_profiles")
+    .select("display_name")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (state.userId !== user.id) return;
+  if (error) {
+    elements.accountMessage.textContent = `Could not load your account name: ${error.message}`;
+    return;
+  }
+  const savedName = data?.display_name
+    || (typeof user.user_metadata?.display_name === "string" ? user.user_metadata.display_name.trim() : "");
+  syncAccountProfile(savedName, user.email);
+}
+
+function syncAccountProfile(displayName, email) {
+  displayName = typeof displayName === "string" ? displayName.trim() : "";
+  const savedName = displayName || null;
+  const nameChanged = state.displayName !== savedName;
+  state.displayName = savedName;
+  if (nameChanged || document.activeElement !== elements.accountName) {
+    elements.accountName.value = displayName;
+  }
+  elements.accountEmail.textContent = email || "Email unavailable";
+  elements.accountMessage.textContent = displayName
+    ? "Your account name is saved."
+    : "Choose a name to personalize your account.";
+  elements.signedInEmail.textContent = displayName || email || "Signed in";
+  if (email) elements.signedInEmail.title = email;
+  elements.libraryGreeting.textContent = `Good morning, ${displayName || "reader"}.`;
 }
 
 function clearSignedOutState() {
   state.userId = null;
   state.userEmail = null;
+  state.displayName = null;
+  elements.accountName.value = "";
+  elements.accountEmail.textContent = "";
+  elements.accountMessage.textContent = "";
+  elements.libraryGreeting.textContent = "Good morning, reader.";
   state.selectedBookPlanBooks = [];
   state.editorSelection = null;
   state.folders = [];

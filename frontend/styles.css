@@ -35,6 +35,7 @@ a { color: inherit; }
 .nav-link.active::after { position: absolute; content: ""; height: 2px; left: 0; right: 0; bottom: -1px; background: var(--accent); }
 .vault-status { margin-left: auto; display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
 .vault-status .button { margin-left: 4px; }
+.vault-status .account-nav-link { font-size: 12px; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px rgba(129, 182, 155, .4); }
 .app-shell { display: grid; grid-template-columns: minmax(0, 1fr) 316px; gap: 36px; max-width: 1600px; margin: auto; padding: 43px 5.2% 72px; }
 .auth-panel { width: min(100% - 32px, 480px); margin: 9vh auto; }
@@ -168,6 +169,15 @@ code { color: var(--accent); font-size: .95em; }
 .panel-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .panel-heading .eyebrow { font-size: 9px; }
 .panel-heading h2 { font-size: 19px; }
+.account-card { max-width: 620px; }
+.account-card .panel-heading { margin-bottom: 12px; }
+.account-email { margin-bottom: 18px; font-size: 12px; }
+.account-form { display: grid; gap: 12px; }
+.account-form label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
+.account-form input { width: 100%; max-width: 420px; min-height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #131923; color: var(--text); }
+.account-form .button { justify-self: start; }
+.account-session-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.account-session-actions h2 { margin: 0; font-size: 15px; }
 .panel-icon { color: var(--accent); font-size: 20px; }
 .today-plan-card { max-width: 860px; padding: 24px; }
 .stats-status { margin-bottom: 18px; }
@@ -270,14 +280,23 @@ code { color: var(--accent); font-size: .95em; }
 .task-settings-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .task-settings-form > label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
 .task-settings-form > label input, .task-settings-form > label select { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #131923; color: var(--text); }
+.task-settings-form #task-interval-field label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
+.task-settings-form #task-interval-field input { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #131923; color: var(--text); }
 .task-days { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
 .task-days legend { padding: 0 5px; color: var(--muted); font-size: 11px; }
 .task-days label { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 11px; }
 .task-days input { accent-color: var(--green); }
 .task-form-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+.task-preview { grid-column: 1 / -1; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(19, 25, 35, .6); }
+.task-preview .eyebrow { margin: 0 0 4px; font-size: 10px; color: var(--accent); }
+.task-preview p:last-child { margin: 0; font-size: 12px; }
+.task-settings-hint { margin: 16px 0 -8px; font-size: 10px; }
 .task-settings-list { display: grid; gap: 6px; margin: 18px 0 0; padding: 0; list-style: none; }
 .task-settings-list li { display: flex; align-items: center; gap: 7px; padding-top: 9px; border-top: 1px solid var(--border); font-size: 11px; }
-.task-settings-list li span { flex: 1; color: var(--muted); }
+.task-settings-list .task-setting-item > input { width: 15px; height: 15px; flex: none; margin: 0; accent-color: var(--green); }
+.task-settings-list .task-setting-description { display: grid; flex: 1; min-width: 0; gap: 3px; color: var(--text); cursor: pointer; }
+.task-settings-list .task-setting-description span { color: var(--muted); font-size: 10px; }
+.task-settings-list .task-setting-item > input:disabled { cursor: not-allowed; opacity: .45; }
 .task-settings-list .button { min-height: 30px; padding: 0 9px; font-size: 10px; }
 /* --- Quick chapter logging, overdue items, and reading progress --- */
 .today-tasks-card { margin-bottom: 18px; }
@@ -370,6 +389,7 @@ code { color: var(--accent); font-size: .95em; }
   .nav-link { font-size: 10px; white-space: nowrap; }
   .vault-status { font-size: 0; }
   .vault-status .status-dot { width: 9px; height: 9px; }
+  .vault-status .account-nav-link { font-size: 10px; }
   .app-shell { gap: 30px; padding: 27px 16px 48px; }
   .page-heading { align-items: flex-start; }
   .testament-progress, .stats-book-list { grid-template-columns: 1fr; }

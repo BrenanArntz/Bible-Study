@@ -895,9 +895,9 @@ async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
   }));
   const completedByPlan = new Map(completedCounts);
   const completedToday = new Set((completions || []).map((completion) => completion.plan_id));
-  const today = localDateKey();
+  const selectedDate = date;
 
-  // Active plans that are not cancelled
+  // Show missed readings only when they were overdue on the selected date.
   const activeCandidatePlans = (plans || []).filter((plan) => plan.status !== "cancelled");
   const overdueReadings = [];
 
@@ -914,7 +914,7 @@ async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
         .select("plan_id,scheduled_date")
         .in("plan_id", planIds)
         .gte("scheduled_date", earliestStart)
-        .lt("scheduled_date", today)
+        .lt("scheduled_date", selectedDate)
         .order("plan_id")
         .order("scheduled_date")
         .range(offset, offset + pageSize - 1);
@@ -926,12 +926,12 @@ async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
       overdueCompletions.map((completion) => `${completion.plan_id}:${completion.scheduled_date}`),
     );
 
-    const todayDayNum = dateDayNumber(today);
+    const selectedDayNum = dateDayNumber(selectedDate);
     for (const plan of activeCandidatePlans) {
       const totalChapters = totalChapterCount(plan);
       const totalReadings = Math.ceil(totalChapters / plan.chapters_per_reading);
       const planStartDayNum = dateDayNumber(plan.start_date);
-      const daysToCheck = Math.max(0, todayDayNum - planStartDayNum);
+      const daysToCheck = Math.max(0, selectedDayNum - planStartDayNum);
       for (let dayOffset = 0; dayOffset < daysToCheck; dayOffset += 1) {
         const scheduledDate = dateFromDayNumber(planStartDayNum + dayOffset);
         const readingIndex = readingIndexForDate(plan, scheduledDate);
@@ -1060,12 +1060,24 @@ async function readingStatistics() {
     }));
   const booksByKey = new Map(books.map((book) => [book.key, book]));
   const plansById = new Map((plans || []).map((plan) => [plan.id, plan]));
+  const completionCounts = new Map();
+  for (const completion of completions) {
+    completionCounts.set(completion.plan_id, (completionCounts.get(completion.plan_id) || 0) + 1);
+  }
+  const archivedPlanIds = new Set((plans || [])
+    .filter((plan) => {
+      if (plan.status === "cancelled") return true;
+      const totalReadings = Math.ceil(totalChapterCount(plan) / plan.chapters_per_reading);
+      return (completionCounts.get(plan.id) || 0) >= totalReadings;
+    })
+    .map((plan) => plan.id));
   const readingDays = new Set();
   let totalChapterReads = 0;
+  let trackedCompletionCount = 0;
 
   for (const completion of completions) {
     const plan = plansById.get(completion.plan_id);
-    if (!plan) continue;
+    if (!plan || archivedPlanIds.has(plan.id)) continue;
     const completedAt = new Date(completion.completed_at);
     if (!validDateKey(completion.scheduled_date) || !validDateKey(plan.start_date)
       || !Number.isFinite(completedAt.getTime())) {
@@ -1082,7 +1094,9 @@ async function readingStatistics() {
       book.chapters[chapter.chapter - 1].reads += 1;
       totalChapterReads += 1;
     }
-    readingDays.add(localDateKey(completedAt));
+    const checkedDate = localDateKey(completedAt);
+    readingDays.add(completion.scheduled_date > checkedDate ? checkedDate : completion.scheduled_date);
+    trackedCompletionCount += 1;
   }
 
   for (const reading of manualReadings) {
@@ -1116,7 +1130,7 @@ async function readingStatistics() {
   const uniqueChaptersRead = bookStats.reduce((total, book) => total + book.unique_chapters_read, 0);
   const bibleReadThroughs = Math.min(...bookStats.flatMap((book) => book.chapters.map((chapter) => chapter.reads)));
   const todayNumber = dateDayNumber(localDateKey());
-  let streakDayNumber = todayNumber - (readingDays.has(dateFromDayNumber(todayNumber)) ? 0 : 1);
+  let streakDayNumber = todayNumber;
   let readingStreak = 0;
   while (readingDays.has(dateFromDayNumber(streakDayNumber))) {
     readingStreak += 1;
@@ -1133,7 +1147,7 @@ async function readingStatistics() {
 
   return {
     note_count: noteCount || 0,
-    completed_readings: completions.length + manualReadings.length,
+    completed_readings: trackedCompletionCount + manualReadings.length,
     reading_days: readingDays.size,
     reading_streak: readingStreak,
     chapter_reads: totalChapterReads,
@@ -1179,57 +1193,25 @@ async function saveBookReadingPlan(payload, id = "") {
   return { id: data.id, status: id ? "updated" : "created" };
 }
 
-async function preserveCompletionsAsChapterReadings(plan, completions, userId) {
-  const totalChapters = totalChapterCount(plan);
-  const rowsToInsert = [];
-  for (const completion of completions) {
-    const offset = readingIndexForDate(plan, completion.scheduled_date);
-    if (offset < 0) continue;
-    const chapters = chaptersForOffset({ ...plan, total_chapters: totalChapters }, offset);
-    if (!chapters.length) continue;
-    const selections = groupChaptersToSelections(chapters);
-    const readDate = completion.scheduled_date || localDateKey(new Date(completion.completed_at));
-    rowsToInsert.push({
-      user_id: userId,
-      read_date: readDate,
-      chapter_selections: selections,
-    });
-  }
-  if (rowsToInsert.length > 0) {
-    const { error } = await supabase.from("study_chapter_readings").insert(rowsToInsert);
-    if (error) console.error("Could not archive completions to study_chapter_readings", error);
-  }
-}
-
 async function cancelBookReadingPlan(id) {
   if (!UUID_PATTERN.test(id)) throw new Error("Invalid book reading plan.");
   const user = await currentUser();
   const { data: plan, error: planError } = await supabase.from("study_reading_plans")
-    .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,user_id,collaborator_email,owner_email")
+    .select("id")
     .eq("id", id)
     .maybeSingle();
   if (planError) return fail(planError, "Could not load book reading plan");
   if (!plan) throw new Error("Reading plan not found or you do not have permission to access it.");
 
-  const { data: completions, error: compError } = await supabase.from("study_reading_plan_completions")
-    .select("scheduled_date,completed_at")
-    .eq("plan_id", id);
-  if (compError) return fail(compError, "Could not load completions for plan");
-
-  // Always ensure read chapters are preserved in study_chapter_readings
-  if (completions?.length) {
-    await preserveCompletionsAsChapterReadings(plan, completions, user.id);
-  }
-
-  // Attempt to update status in DB
   const { error: updateError } = await supabase.from("study_reading_plans")
     .update({ status: "cancelled" })
     .eq("id", id);
+  if (updateError && !(updateError.message?.includes("column") || updateError.code === "42703")) {
+    return fail(updateError, "Could not archive book reading plan");
+  }
 
-  // Always persist local status override so it appears in Reading plan archive even if DB lacks status column
   setLocalPlanStatus(user.id, id, "cancelled");
-
-  return { status: "cancelled", retained_readings: completions?.length || 0 };
+  return { status: "cancelled" };
 }
 
 async function continueBookReadingPlan(id, newStartDate = localDateKey()) {
@@ -1249,11 +1231,6 @@ async function continueBookReadingPlan(id, newStartDate = localDateKey()) {
     .eq("plan_id", id);
 
   const completedCount = completions?.length || 0;
-
-  // Make sure previous completed readings are archived in study_chapter_readings
-  if (completions?.length) {
-    await preserveCompletionsAsChapterReadings(plan, completions, user.id);
-  }
 
   // Calculate adjusted start_date so the next unread reading (reading #completedCount)
   // is scheduled on newStartDate
@@ -1299,7 +1276,7 @@ async function toggleBookReading(planId, date) {
   if (!UUID_PATTERN.test(planId) || !validDateKey(date)) throw new Error("Invalid book reading completion.");
   const user = await currentUser();
   const { data: plan, error: planError } = await supabase.from("study_reading_plans")
-    .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,user_id,collaborator_email,owner_email")
+    .select("id,title,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,user_id,collaborator_email,owner_email")
     .eq("id", planId)
     .maybeSingle();
   if (planError) return fail(planError, "Could not load book reading plan");
@@ -1320,6 +1297,7 @@ async function toggleBookReading(planId, date) {
     ? supabase.from("study_reading_plan_completions").delete().eq("plan_id", planId).eq("scheduled_date", date)
     : supabase.from("study_reading_plan_completions").insert({
       plan_id: planId,
+      plan_title: plan.title,
       user_id: user.id,
       scheduled_date: date,
     });
@@ -1330,11 +1308,13 @@ async function toggleBookReading(planId, date) {
 
 async function saveChapterReading(payload) {
   const selections = normalizeChapterSelections(payload.chapter_selections);
+  const readDate = String(payload.read_date || "");
+  if (!validDateKey(readDate)) throw new Error("Choose a valid schedule date for this chapter reading.");
   const user = await currentUser();
   const { data, error } = await supabase.from("study_chapter_readings")
     .insert({
       user_id: user.id,
-      read_date: localDateKey(),
+      read_date: readDate,
       chapter_selections: selections,
     })
     .select("id")
@@ -1343,53 +1323,71 @@ async function saveChapterReading(payload) {
   return {
     id: data.id,
     reference: formatChapterSelections(selections),
+    read_date: readDate,
     chapter_count: selections.reduce((total, selection) => total + selection.end - selection.start + 1, 0),
   };
 }
 
-async function deleteBookReadingPlan(id, options = {}) {
+async function deleteBookReadingPlan(id) {
   if (!UUID_PATTERN.test(id)) throw new Error("Invalid book reading plan.");
   const user = await currentUser();
-  const { retainChapters = true } = options;
-
-  if (retainChapters) {
-    const { data: plan } = await supabase.from("study_reading_plans")
-      .select("id,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,user_id")
+  let { data: plan, error: planError } = await supabase.from("study_reading_plans")
+    .select("id,books,chapter_selections,chapters_per_reading,status")
+    .eq("id", id)
+    .maybeSingle();
+  if (planError && (planError.message?.includes("column") || planError.code === "42703")) {
+    const fallbackResult = await supabase.from("study_reading_plans")
+      .select("id,books,chapter_selections,chapters_per_reading")
       .eq("id", id)
       .maybeSingle();
-
-    if (plan) {
-      const { data: completions } = await supabase.from("study_reading_plan_completions")
-        .select("scheduled_date,completed_at")
-        .eq("plan_id", id);
-
-      if (completions?.length) {
-        await preserveCompletionsAsChapterReadings(plan, completions, user.id);
-      }
-    }
+    plan = fallbackResult.data;
+    planError = fallbackResult.error;
   }
+  if (planError) return fail(planError, "Could not load book reading plan");
+  if (!plan) throw new Error("Reading plan not found or you do not have permission to delete it.");
+
+  const localStatuses = getLocalPlanStatuses(user.id);
+  const status = localStatuses[id] || plan.status || "active";
+  let archived = status === "cancelled";
+  if (!archived) {
+    const { count, error: countError } = await supabase.from("study_reading_plan_completions")
+      .select("plan_id", { count: "exact", head: true })
+      .eq("plan_id", id);
+    if (countError) return fail(countError, "Could not check book reading plan status");
+    archived = (count || 0) >= Math.ceil(totalChapterCount(plan) / plan.chapters_per_reading);
+  }
+  if (!archived) throw new Error("Only archived reading plans can be deleted.");
 
   const { data, error } = await supabase.from("study_reading_plans").delete().eq("id", id).select("id");
   if (error) return fail(error, "Could not delete book reading plan");
   if (!data?.length) throw new Error("Reading plan not found or you do not have permission to delete it.");
+  setLocalPlanStatus(user.id, id, null);
   return { status: "deleted" };
 }
 
 // --- Recurring task schedules, completions, and ESV lookup ---
-async function taskPlan(date = new Date().toISOString().slice(0, 10)) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Use a valid task date.");
+async function taskPlan(date = localDateKey()) {
+  if (!validDateKey(date)) throw new Error("Use a valid task date.");
   const user = await currentUser();
   const [{ data: tasks, error: taskError }, { data: completed, error: completionError }] = await Promise.all([
-    supabase.from("study_tasks").select("id,task_type,title,details,weekdays").order("created_at"),
+    supabase.from("study_tasks")
+      .select("id,task_type,title,details,weekdays,cadence_type,interval_days,start_date")
+      .order("created_at"),
     supabase.from("study_task_completions").select("task_id").eq("completion_date", date),
   ]);
   if (taskError) return fail(taskError, "Could not load recurring tasks");
   if (completionError) return fail(completionError, "Could not load task completions");
   const done = new Set((completed || []).map((item) => item.task_id));
-  const weekday = new Date(`${date}T12:00:00`).getDay();
+  const scheduledTasks = (tasks || []).map((task) => ({
+    ...task,
+    cadence_type: task.cadence_type || "weekdays",
+    interval_days: task.interval_days || 1,
+    scheduled: readingIndexForDate(task, date) >= 0,
+    completed: done.has(task.id),
+  }));
   return {
-    tasks: tasks || [],
-    items: (tasks || []).filter((task) => task.weekdays.includes(weekday)).map((task) => ({ ...task, completed: done.has(task.id) })),
+    tasks: scheduledTasks,
+    items: scheduledTasks.filter((task) => task.scheduled),
     date,
     user_id: user.id,
   };
@@ -1397,12 +1395,30 @@ async function taskPlan(date = new Date().toISOString().slice(0, 10)) {
 
 async function saveTask(payload, id = "") {
   const user = await currentUser();
-  const weekdays = [...new Set((Array.isArray(payload.weekdays) ? payload.weekdays : []).map(Number))].sort();
+  const cadenceType = payload.cadence_type;
+  const intervalDays = Number(payload.interval_days);
+  const startDate = String(payload.start_date || "");
+  const weekdays = cadenceType === "weekdays"
+    ? [...new Set((Array.isArray(payload.weekdays) ? payload.weekdays : []).map(Number))].sort()
+    : null;
   const title = String(payload.title || "").trim();
-  if (!TASK_TYPES.includes(payload.task_type) || !title || title.length > 120 || !weekdays.length || weekdays.some((day) => day < 0 || day > 6)) {
-    throw new Error("Choose a task type, name, and at least one repeat day.");
+  if (!TASK_TYPES.includes(payload.task_type) || !title || title.length > 120
+    || !["interval", "weekdays"].includes(cadenceType)
+    || (cadenceType === "interval" && (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 365))
+    || (cadenceType === "weekdays" && (!weekdays.length || weekdays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)))
+    || !validDateKey(startDate)) {
+    throw new Error("Choose a task type, name, valid recurrence, and start date.");
   }
-  const values = { user_id: user.id, task_type: payload.task_type, title, details: String(payload.details || "").trim().slice(0, 300), weekdays };
+  const values = {
+    user_id: user.id,
+    task_type: payload.task_type,
+    title,
+    details: String(payload.details || "").trim().slice(0, 300),
+    cadence_type: cadenceType,
+    interval_days: intervalDays,
+    weekdays,
+    start_date: startDate,
+  };
   const query = id
     ? supabase.from("study_tasks").update(values).eq("id", id).select("id").maybeSingle()
     : supabase.from("study_tasks").insert(values).select("id").single();
@@ -1417,9 +1433,24 @@ async function toggleTask(taskId, date) {
   const user = await currentUser();
   const { data: existing, error: findError } = await supabase.from("study_task_completions").select("task_id").eq("task_id", taskId).eq("completion_date", date).maybeSingle();
   if (findError) return fail(findError, "Could not check task completion");
+  let taskTitle = "";
+  if (!existing) {
+    const { data: task, error: taskError } = await supabase.from("study_tasks")
+      .select("title")
+      .eq("id", taskId)
+      .maybeSingle();
+    if (taskError) return fail(taskError, "Could not load task name");
+    if (!task) throw new Error("Task not found or you do not have permission to access it.");
+    taskTitle = task.title;
+  }
   const query = existing
     ? supabase.from("study_task_completions").delete().eq("task_id", taskId).eq("completion_date", date)
-    : supabase.from("study_task_completions").insert({ task_id: taskId, user_id: user.id, completion_date: date });
+    : supabase.from("study_task_completions").insert({
+      task_id: taskId,
+      task_title: taskTitle,
+      user_id: user.id,
+      completion_date: date,
+    });
   const { error } = await query;
   if (error) return fail(error, "Could not update task completion");
   return { completed: !existing };
@@ -1562,7 +1593,7 @@ export async function apiRequest(url, options = {}) {
   }
   const bookPlan = path.match(/^\/api\/book-reading-plans\/([0-9a-f-]+)$/i);
   if (bookPlan && method === "PUT") return saveBookReadingPlan(JSON.parse(options.body), bookPlan[1]);
-  if (bookPlan && method === "DELETE") return deleteBookReadingPlan(bookPlan[1], { retainChapters: parsed.searchParams.get("retain_chapters") === "true" });
+  if (bookPlan && method === "DELETE") return deleteBookReadingPlan(bookPlan[1]);
   const taskToggle = path.match(/^\/api\/tasks\/([0-9a-f-]+)\/toggle$/i);
   if (taskToggle && method === "POST") return toggleTask(taskToggle[1], parsed.searchParams.get("date") || "");
   const task = path.match(/^\/api\/tasks\/([0-9a-f-]+)$/i);
