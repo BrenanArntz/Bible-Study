@@ -170,7 +170,7 @@ create table if not exists public.study_tasks (
     weekdays integer[],
     cadence_type text not null default 'weekdays',
     interval_days integer not null default 1,
-    start_date date not null default current_date,
+    start_date date not null default ((now() at time zone 'America/New_York')::date),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -182,10 +182,10 @@ alter table public.study_tasks
 alter table public.study_tasks
     add column if not exists start_date date;
 update public.study_tasks
-    set start_date = created_at::date
+    set start_date = (created_at at time zone 'America/New_York')::date
     where start_date is null;
 alter table public.study_tasks
-    alter column start_date set default current_date;
+    alter column start_date set default ((now() at time zone 'America/New_York')::date);
 alter table public.study_tasks
     alter column start_date set not null;
 alter table public.study_tasks
@@ -425,10 +425,12 @@ create table if not exists public.study_chapter_readings (
     id uuid primary key default gen_random_uuid(),
     user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
     performed_by_name text not null,
-    read_date date not null default current_date,
+    read_date date not null default ((now() at time zone 'America/New_York')::date),
     chapter_selections jsonb not null check (jsonb_typeof(chapter_selections) = 'array'),
     created_at timestamptz not null default now()
 );
+alter table public.study_chapter_readings
+    alter column read_date set default ((now() at time zone 'America/New_York')::date);
 
 alter table public.study_chapter_readings
     add column if not exists performed_by_name text;

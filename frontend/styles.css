@@ -180,6 +180,13 @@ code { color: var(--accent); font-size: .95em; }
 .account-session-actions h2 { margin: 0; font-size: 15px; }
 .panel-icon { color: var(--accent); font-size: 20px; }
 .today-plan-card { max-width: 860px; padding: 24px; }
+.today-reading-status { display: flex; align-items: center; gap: 8px; margin-left: 8px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.today-reading-status-icon { display: grid; width: 21px; height: 21px; flex: none; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--quiet); font-size: 13px; font-weight: 700; }
+.today-reading-status[data-read="true"] { color: var(--green); }
+.today-reading-status[data-read="false"] { color: var(--danger); }
+.today-reading-status[data-read="true"] .today-reading-status-icon { border-color: rgba(129, 182, 155, .55); background: rgba(129, 182, 155, .1); color: var(--green); }
+.today-reading-status[data-error="true"] { max-width: 260px; color: var(--danger); white-space: normal; }
+.today-reading-status[data-error="true"] .today-reading-status-icon { border-color: rgba(229, 154, 143, .55); color: var(--danger); }
 .stats-status { margin-bottom: 18px; }
 /* --- Reading statistics and completed-plan archive --- */
 .stats-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
@@ -392,6 +399,7 @@ code { color: var(--accent); font-size: .95em; }
   .vault-status .account-nav-link { font-size: 10px; }
   .app-shell { gap: 30px; padding: 27px 16px 48px; }
   .page-heading { align-items: flex-start; }
+  .today-reading-status { margin: 8px 0 0 auto; }
   .testament-progress, .stats-book-list { grid-template-columns: 1fr; }
   .stats-books-section .section-heading { align-items: flex-start; flex-direction: column; }
   .book-plan-form { grid-template-columns: 1fr; }

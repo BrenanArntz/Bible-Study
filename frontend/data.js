@@ -578,6 +578,18 @@ function searchNotes(params) {
 // --- Reading plan validation, chapter parsing, and calendar helpers ---
 const TASK_TYPES = ["personal-reading", "reading-with-haley", "verse-quiz", "greek", "church-history", "other"];
 const UUID_PATTERN = /^[0-9a-f-]{36}$/i;
+const READING_TIME_ZONE = "America/New_York";
+
+export function dateKeyInNewYork(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: READING_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
 
 function validDateKey(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
@@ -591,13 +603,6 @@ function dateDayNumber(date) {
 
 function dateFromDayNumber(dayNumber) {
   return new Date(dayNumber * 86400000).toISOString().slice(0, 10);
-}
-
-function localDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function canonicalBookName(value) {
@@ -878,7 +883,7 @@ async function fetchReadingPlans() {
   });
 }
 
-async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
+async function bookReadingPlans(date = dateKeyInNewYork()) {
   if (!validDateKey(date)) throw new Error("Use a valid reading plan date.");
   const [plans, { data: completions, error: completionError }] = await Promise.all([
     fetchReadingPlans(),
@@ -1014,6 +1019,24 @@ async function bookReadingPlans(date = new Date().toISOString().slice(0, 10)) {
   };
 }
 
+async function readingDayStatus(date = dateKeyInNewYork()) {
+  if (!validDateKey(date)) throw new Error("Use a valid reading date.");
+  const [chapterReadings, planCompletions] = await Promise.all([
+    supabase.from("study_chapter_readings")
+      .select("id", { count: "exact", head: true })
+      .eq("read_date", date),
+    supabase.from("study_reading_plan_completions")
+      .select("plan_id", { count: "exact", head: true })
+      .eq("scheduled_date", date),
+  ]);
+  if (chapterReadings.error) return fail(chapterReadings.error, "Could not check chapter readings");
+  if (planCompletions.error) return fail(planCompletions.error, "Could not check book reading completions");
+  return {
+    date,
+    has_read: (chapterReadings.count || 0) > 0 || (planCompletions.count || 0) > 0,
+  };
+}
+
 async function readingStatistics() {
   const [
     plans,
@@ -1094,7 +1117,7 @@ async function readingStatistics() {
       book.chapters[chapter.chapter - 1].reads += 1;
       totalChapterReads += 1;
     }
-    const checkedDate = localDateKey(completedAt);
+    const checkedDate = dateKeyInNewYork(completedAt);
     readingDays.add(completion.scheduled_date > checkedDate ? checkedDate : completion.scheduled_date);
     trackedCompletionCount += 1;
   }
@@ -1129,8 +1152,9 @@ async function readingStatistics() {
   const totalBibleChapters = bookStats.reduce((total, book) => total + book.total_chapters, 0);
   const uniqueChaptersRead = bookStats.reduce((total, book) => total + book.unique_chapters_read, 0);
   const bibleReadThroughs = Math.min(...bookStats.flatMap((book) => book.chapters.map((chapter) => chapter.reads)));
-  const todayNumber = dateDayNumber(localDateKey());
-  let streakDayNumber = todayNumber;
+  const todayKey = dateKeyInNewYork();
+  const todayNumber = dateDayNumber(todayKey);
+  let streakDayNumber = readingDays.has(todayKey) ? todayNumber : todayNumber - 1;
   let readingStreak = 0;
   while (readingDays.has(dateFromDayNumber(streakDayNumber))) {
     readingStreak += 1;
@@ -1214,7 +1238,7 @@ async function cancelBookReadingPlan(id) {
   return { status: "cancelled" };
 }
 
-async function continueBookReadingPlan(id, newStartDate = localDateKey()) {
+async function continueBookReadingPlan(id, newStartDate = dateKeyInNewYork()) {
   if (!UUID_PATTERN.test(id)) throw new Error("Invalid book reading plan.");
   if (!validDateKey(newStartDate)) throw new Error("Enter a valid start date (YYYY-MM-DD).");
   const user = await currentUser();
@@ -1366,7 +1390,7 @@ async function deleteBookReadingPlan(id) {
 }
 
 // --- Recurring task schedules, completions, and ESV lookup ---
-async function taskPlan(date = localDateKey()) {
+async function taskPlan(date = dateKeyInNewYork()) {
   if (!validDateKey(date)) throw new Error("Use a valid task date.");
   const user = await currentUser();
   const [{ data: tasks, error: taskError }, { data: completed, error: completionError }] = await Promise.all([
@@ -1579,6 +1603,7 @@ export async function apiRequest(url, options = {}) {
   if (path === "/api/book-reading-plans" && method === "GET") return bookReadingPlans(parsed.searchParams.get("date") || undefined);
   if (path === "/api/book-reading-plans" && method === "POST") return saveBookReadingPlan(JSON.parse(options.body));
   if (path === "/api/chapter-readings" && method === "POST") return saveChapterReading(JSON.parse(options.body));
+  if (path === "/api/reading-status" && method === "GET") return readingDayStatus(parsed.searchParams.get("date") || undefined);
   if (path === "/api/reading-statistics" && method === "GET") return readingStatistics();
   if (path === "/api/tasks" && method === "GET") return taskPlan(parsed.searchParams.get("date") || undefined);
   if (path === "/api/tasks" && method === "POST") return saveTask(JSON.parse(options.body));

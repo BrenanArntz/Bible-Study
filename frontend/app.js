@@ -1,6 +1,7 @@
 import {
   apiRequest,
   BIBLE_CHAPTER_COUNTS as bibleChapterCounts,
+  dateKeyInNewYork,
   getImageUrl,
   totalChapterCount,
   scheduledDateForIndex,
@@ -82,6 +83,9 @@ const elements = {
   refreshButton: document.querySelector("#refresh-button"),
   todayRefreshButton: document.querySelector("#today-refresh-button"),
   todayDate: document.querySelector("#today-date"),
+  todayReadingStatus: document.querySelector("#today-reading-status"),
+  todayReadingStatusIcon: document.querySelector("#today-reading-status-icon"),
+  todayReadingStatusText: document.querySelector("#today-reading-status-text"),
   scheduleDate: document.querySelector("#schedule-date"),
   bookPlanTodayEmpty: document.querySelector("#book-plan-today-empty"),
   bookPlanUpcoming: document.querySelector("#book-plan-upcoming"),
@@ -1620,31 +1624,38 @@ async function deleteNote() {
 // --- Today view: dates, schedules, and recurring tasks ---
 function formatDate(value) {
   if (!value) return "No date";
-  const date = new Date(`${value}T00:00:00`);
+  const date = new Date(`${value}T12:00:00Z`);
   return Number.isNaN(date.getTime())
     ? String(value)
-    : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date);
+    : new Intl.DateTimeFormat(undefined, {
+      timeZone: "America/New_York",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(date);
 }
 
 function getSelectedScheduleDate() {
-  return (elements.scheduleDate?.value || elements.bookPlanDate?.value || localDateKey()).trim();
+  return (elements.scheduleDate?.value || elements.bookPlanDate?.value || dateKeyInNewYork()).trim();
 }
 
 function setSelectedScheduleDate(date) {
-  const value = date || localDateKey();
+  const value = date || dateKeyInNewYork();
   if (elements.scheduleDate) elements.scheduleDate.value = value;
   if (elements.bookPlanDate) elements.bookPlanDate.value = value;
 }
 
 async function loadReadingPlan() {
   const dateValue = getSelectedScheduleDate();
-  const date = new Date(`${dateValue}T12:00:00`);
+  const date = new Date(`${dateValue}T12:00:00Z`);
   elements.todayDate.textContent = new Intl.DateTimeFormat(undefined, {
+    timeZone: "America/New_York",
     weekday: "long",
     month: "long",
     day: "numeric",
     year: "numeric",
   }).format(date);
+  const todayReadingStatusRequest = loadTodayReadingStatus();
   try {
     await loadRecurringTasks(dateValue);
   } catch (error) {
@@ -1653,6 +1664,25 @@ async function loadReadingPlan() {
     elements.todayTasksEmpty.textContent = `Could not load recurring tasks: ${error.message}`;
   }
   await loadBookReadingPlans(dateValue);
+  await todayReadingStatusRequest;
+}
+
+async function loadTodayReadingStatus() {
+  try {
+    const status = await requestJson(`/api/reading-status?date=${dateKeyInNewYork()}`);
+    elements.todayReadingStatus.dataset.read = String(status.has_read);
+    elements.todayReadingStatus.dataset.error = "false";
+    elements.todayReadingStatus.setAttribute("aria-busy", "false");
+    elements.todayReadingStatusIcon.textContent = status.has_read ? "✔️" : "❌";
+    elements.todayReadingStatusText.textContent = status.has_read
+      ? "At least one chapter read today"
+      : "No chapter logged today";
+  } catch (error) {
+    elements.todayReadingStatus.dataset.error = "true";
+    elements.todayReadingStatus.setAttribute("aria-busy", "false");
+    elements.todayReadingStatusIcon.textContent = "!";
+    elements.todayReadingStatusText.textContent = `Could not check today's reading: ${error.message}`;
+  }
 }
 
 async function loadBookReadingPlans(dateValue = getSelectedScheduleDate()) {
@@ -1854,13 +1884,6 @@ async function saveRecurringTask(event) {
 }
 
 // --- Book-plan editing, selected books, and reading checklists ---
-function localDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function appendBookReadingItem(list, plan, reading, date, overdue = false) {
   const row = document.createElement("li");
   row.className = "reading-item";
@@ -1894,7 +1917,7 @@ function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlan
   const scheduled = plans.filter((plan) => plan.today_reading);
   const done = scheduled.filter((plan) => plan.today_reading.completed).length;
   const percent = scheduled.length ? Math.round((done / scheduled.length) * 100) : 0;
-  const dateLabel = date === localDateKey() ? "today" : formatDate(date);
+  const dateLabel = date === dateKeyInNewYork() ? "today" : formatDate(date);
   elements.bookPlanProgressLabel.textContent = plans.length
     ? `${done} of ${scheduled.length} readings complete for ${dateLabel}`
     : completedPlans.length ? "All book reading plans complete" : "No book reading plans";
@@ -2068,7 +2091,7 @@ function promptContinueBookPlan(plan) {
     elements.continuePlanScope.textContent = plan.reading_scope || "";
   }
   if (elements.continuePlanDate) {
-    elements.continuePlanDate.value = localDateKey();
+    elements.continuePlanDate.value = dateKeyInNewYork();
   }
   if (elements.continuePlanDialog) {
     elements.continuePlanDialog.showModal();
@@ -2080,7 +2103,7 @@ if (elements.continuePlanForm) {
     event.preventDefault();
     const plan = state.pendingContinuePlan;
     if (!plan) return;
-    const startDate = elements.continuePlanDate?.value || localDateKey();
+    const startDate = elements.continuePlanDate?.value || dateKeyInNewYork();
     try {
       if (elements.continuePlanSubmit) elements.continuePlanSubmit.disabled = true;
       await requestJson(`/api/book-reading-plans/${plan.id}/continue`, {
@@ -2223,7 +2246,7 @@ function updateBookPlanPreview() {
       .map((cb) => Number(cb.value))
       .sort((a, b) => a - b);
     const intervalDays = Math.max(1, Number(elements.bookPlanInterval.value) || 1);
-    const startDate = elements.bookPlanStartDate.value || localDateKey();
+    const startDate = elements.bookPlanStartDate.value || dateKeyInNewYork();
 
     if (cadenceType === "weekdays" && !weekdays.length) {
       elements.bookPlanPreviewSummary.textContent = `${chaptersCount} chapters · ${totalReadings} readings · Please select at least one day of the week`;
@@ -2298,7 +2321,7 @@ function resetBookPlanForm() {
   elements.bookPlanEditId.value = "";
   elements.bookPlanSaveButton.textContent = "Create plan";
   elements.bookPlanEditWarning.hidden = true;
-  elements.bookPlanStartDate.value = localDateKey();
+  elements.bookPlanStartDate.value = dateKeyInNewYork();
   elements.bookPlanCadenceType.value = "interval";
   elements.bookPlanInterval.value = "1";
   document.querySelectorAll('input[name="book-plan-day"]').forEach((checkbox) => {
@@ -2340,11 +2363,13 @@ async function saveBookReadingPlan(event) {
 async function toggleBookReadingCompletion(id, date) {
   try {
     const result = await requestJson(`/api/book-reading-plans/${id}/toggle?date=${date}`, { method: "POST" });
-    if (result.completed && date < localDateKey()) showToast("Overdue reading marked complete.");
+    if (result.completed && date < dateKeyInNewYork()) showToast("Overdue reading marked complete.");
     await loadBookReadingPlans();
+    await loadTodayReadingStatus();
   } catch (error) {
     showToast(error.message, true);
     await loadBookReadingPlans();
+    await loadTodayReadingStatus();
   }
 }
 
@@ -2362,6 +2387,7 @@ async function saveQuickChapterReading(event) {
     });
     elements.quickReadingForm.reset();
     showToast(`Logged ${result.reference} for ${formatDate(result.read_date)}.`);
+    await loadTodayReadingStatus();
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -2617,9 +2643,9 @@ elements.deleteButton.addEventListener("click", deleteNote);
 elements.refreshButton.addEventListener("click", refreshLibrary);
 elements.todayRefreshButton.addEventListener("click", loadReadingPlan);
 elements.quickReadingForm.addEventListener("submit", saveQuickChapterReading);
-setSelectedScheduleDate(localDateKey());
-elements.bookPlanStartDate.value = localDateKey();
-elements.taskStartDate.value = localDateKey();
+setSelectedScheduleDate(dateKeyInNewYork());
+elements.bookPlanStartDate.value = dateKeyInNewYork();
+elements.taskStartDate.value = dateKeyInNewYork();
 updateTaskCadenceUI();
 if (elements.scheduleDate) {
   elements.scheduleDate.addEventListener("change", () => {
