@@ -5,7 +5,6 @@ import {
   getImageUrl,
   totalChapterCount,
   scheduledDateForIndex,
-  readingIndexForDate,
   formatCadence,
   normalizeChapterSelections,
 } from "./data.js";
@@ -31,7 +30,6 @@ const state = {
   userId: null,
   userEmail: null,
   displayName: null,
-  bookPlanOriginal: null,
   selectedBookPlanBooks: [],
   // pending plan to continue from archive
   pendingContinuePlan: null,
@@ -90,6 +88,9 @@ const elements = {
   bookPlanTodayEmpty: document.querySelector("#book-plan-today-empty"),
   bookPlanUpcoming: document.querySelector("#book-plan-upcoming"),
   bookPlanTodayList: document.querySelector("#book-plan-today-list"),
+  readingLogsList: document.querySelector("#reading-logs-list"),
+  readingLogsEmpty: document.querySelector("#reading-logs-empty"),
+  readingLogsTitle: document.querySelector("#logged-readings-title"),
   bookPlanOverdueSection: document.querySelector("#book-plan-overdue-section"),
   bookPlanOverdueList: document.querySelector("#book-plan-overdue-list"),
   quickReadingForm: document.querySelector("#quick-reading-form"),
@@ -159,15 +160,14 @@ const elements = {
   bookPlanWeekdaysField: document.querySelector("#book-plan-weekdays-field"),
   bookPlanStartDate: document.querySelector("#book-plan-start-date"),
   bookPlanPartnerEmail: document.querySelector("#book-plan-partner-email"),
+  bookPlanPreview: document.querySelector("#book-plan-preview"),
   bookPlanPreviewSummary: document.querySelector("#book-plan-preview-summary"),
   bookPlanPreviewFinish: document.querySelector("#book-plan-preview-finish"),
   bookPlanDaysAll: document.querySelector("#book-plan-days-all"),
   bookPlanDaysWeekdays: document.querySelector("#book-plan-days-weekdays"),
   bookPlanDaysWeekends: document.querySelector("#book-plan-days-weekends"),
-  bookPlanDate: document.querySelector("#book-plan-date"),
   bookPlanCancel: document.querySelector("#book-plan-cancel"),
   bookPlanSaveButton: document.querySelector("#book-plan-save-button"),
-  bookPlanEditWarning: document.querySelector("#book-plan-edit-warning"),
   bookPlanList: document.querySelector("#book-plan-list"),
   bookPlansEmpty: document.querySelector("#book-plans-empty"),
   completedPlansCount: document.querySelector("#completed-plans-count"),
@@ -1636,13 +1636,12 @@ function formatDate(value) {
 }
 
 function getSelectedScheduleDate() {
-  return (elements.scheduleDate?.value || elements.bookPlanDate?.value || dateKeyInNewYork()).trim();
+  return (elements.scheduleDate?.value || dateKeyInNewYork()).trim();
 }
 
 function setSelectedScheduleDate(date) {
   const value = date || dateKeyInNewYork();
   if (elements.scheduleDate) elements.scheduleDate.value = value;
-  if (elements.bookPlanDate) elements.bookPlanDate.value = value;
 }
 
 async function loadReadingPlan() {
@@ -1664,7 +1663,7 @@ async function loadReadingPlan() {
     elements.todayTasksEmpty.textContent = `Could not load recurring tasks: ${error.message}`;
   }
   await loadBookReadingPlans(dateValue);
-  await todayReadingStatusRequest;
+  await Promise.all([todayReadingStatusRequest, loadReadingLogs(dateValue)]);
 }
 
 async function loadTodayReadingStatus() {
@@ -1710,6 +1709,114 @@ async function loadBookReadingPlans(dateValue = getSelectedScheduleDate()) {
     elements.bookPlanProgressPercent.textContent = "—";
     elements.bookPlanProgressBar.style.width = "0";
   }
+}
+
+async function loadReadingLogs(dateValue = getSelectedScheduleDate()) {
+  try {
+    const logs = await requestJson(`/api/reading-logs?date=${encodeURIComponent(dateValue)}`);
+    renderReadingLogs(logs, dateValue);
+  } catch (error) {
+    elements.readingLogsList.replaceChildren();
+    elements.readingLogsEmpty.hidden = false;
+    elements.readingLogsEmpty.textContent = `Could not load reading logs: ${error.message}`;
+  }
+}
+
+function renderReadingLogs(logs, dateValue) {
+  elements.readingLogsTitle.textContent = `Logged on ${formatDate(dateValue)}`;
+  elements.readingLogsList.replaceChildren();
+  elements.readingLogsEmpty.hidden = logs.length > 0;
+  elements.readingLogsEmpty.textContent = `No reading logs for ${formatDate(dateValue)}.`;
+  logs.forEach((log) => {
+    const row = document.createElement("li");
+    row.className = "reading-item reading-log-item";
+    const description = document.createElement("div");
+    description.className = "reading-log-description";
+    const source = document.createElement("span");
+    source.className = "reading-date";
+    source.textContent = log.source_type === "plan" ? "Reading plan" : "Manual reading";
+    const reference = document.createElement("span");
+    reference.className = "reading-reference";
+    reference.textContent = log.reference;
+    description.append(source, reference);
+    row.append(description);
+    if (log.source_type === "manual") {
+      const actions = document.createElement("div");
+      actions.className = "book-plan-actions";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "button button-quiet";
+      edit.textContent = "Edit";
+      edit.addEventListener("click", () => editManualReadingLog(row, log));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "button button-danger";
+      remove.textContent = "Delete";
+      remove.addEventListener("click", () => deleteManualReadingLog(log));
+      actions.append(edit, remove);
+      row.append(actions);
+    }
+    elements.readingLogsList.append(row);
+  });
+}
+
+function editManualReadingLog(row, log) {
+  const form = document.createElement("form");
+  form.className = "reading-log-edit";
+  const selections = document.createElement("input");
+  selections.required = true;
+  selections.value = log.reference;
+  selections.setAttribute("aria-label", "Chapter selections");
+  const date = document.createElement("input");
+  date.type = "date";
+  date.required = true;
+  date.value = log.read_date;
+  date.setAttribute("aria-label", "Reading date");
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.className = "button button-primary";
+  save.textContent = "Save";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "button button-quiet";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => loadReadingLogs());
+  form.append(selections, date, save, cancel);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    save.disabled = true;
+    try {
+      await requestJson(`/api/reading-logs/${log.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chapter_selections: selections.value, read_date: date.value }),
+      });
+      await Promise.all([loadReadingLogs(), loadTodayReadingStatus()]);
+      await loadReadingStatisticsIfVisible();
+      showToast("Reading log updated.");
+    } catch (error) {
+      showToast(error.message, true);
+      save.disabled = false;
+    }
+  });
+  row.replaceChildren(form);
+  selections.focus();
+}
+
+async function deleteManualReadingLog(log) {
+  if (!window.confirm(`Delete the manual reading log “${log.reference}”?`)) return;
+  try {
+    await requestJson(`/api/reading-logs/${log.id}`, { method: "DELETE" });
+    await Promise.all([loadReadingLogs(), loadTodayReadingStatus()]);
+    await loadReadingStatisticsIfVisible();
+    showToast("Reading log deleted.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function loadReadingStatisticsIfVisible() {
+  if (state.activeView === "stats") await loadReadingStatistics();
 }
 
 const taskTypeLabels = {
@@ -1774,16 +1881,23 @@ function renderTaskSettings(tasks) {
     const title = document.createElement("strong");
     title.textContent = `${taskTypeLabels[task.task_type] || "Task"}: ${task.title}`;
     const schedule = document.createElement("span");
-    schedule.textContent = `${formatCadence(task)} · Starts ${formatDate(task.start_date)}`;
+    schedule.textContent = `${formatCadence(task)} · Starts ${formatDate(task.start_date)} · ${task.status}`;
     description.append(title, schedule);
     row.append(checkbox, description);
     const edit = document.createElement("button");
     edit.type = "button"; edit.className = "button button-quiet"; edit.textContent = "Edit";
     edit.addEventListener("click", () => editRecurringTask(task));
+    const pause = document.createElement("button");
+    pause.type = "button";
+    pause.className = "button button-quiet";
+    pause.textContent = task.status === "active" ? "Pause" : "Resume";
+    pause.disabled = task.status === "archived";
+    pause.addEventListener("click", () => updateTaskStatus(task, task.status === "active" ? "paused" : "active"));
     const remove = document.createElement("button");
-    remove.type = "button"; remove.className = "button button-danger"; remove.textContent = "Delete";
+    remove.type = "button"; remove.className = "button button-danger"; remove.textContent = "Archive";
+    remove.disabled = task.status === "archived";
     remove.addEventListener("click", () => deleteRecurringTask(task));
-    row.append(edit, remove);
+    row.append(edit, pause, remove);
     elements.taskSettingsList.append(row);
   });
 }
@@ -1853,11 +1967,23 @@ async function toggleTaskCompletion(id) {
 }
 
 async function deleteRecurringTask(task) {
-  if (!window.confirm(`Delete recurring task “${task.title}”?`)) return;
+  if (!window.confirm(`Archive recurring task “${task.title}”? Its past check-offs will be kept.`)) return;
   try {
     await requestJson(`/api/tasks/${task.id}`, { method: "DELETE" });
     if (elements.taskEditId.value === task.id) resetTaskForm();
     await loadRecurringTasks();
+    showToast("Recurring task archived.");
+  } catch (error) { showToast(error.message, true); }
+}
+
+async function updateTaskStatus(task, status) {
+  try {
+    await requestJson(`/api/tasks/${task.id}/status`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    await loadRecurringTasks();
+    showToast(status === "paused" ? "Recurring task paused." : "Recurring task resumed.");
   } catch (error) { showToast(error.message, true); }
 }
 
@@ -1887,14 +2013,13 @@ async function saveRecurringTask(event) {
 function appendBookReadingItem(list, plan, reading, date, overdue = false) {
   const row = document.createElement("li");
   row.className = "reading-item";
-  row.classList.toggle("completed", reading.completed);
+  row.classList.toggle("completed", reading.completed || reading.skipped);
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = reading.completed;
-  checkbox.id = overdue
-    ? `book-reading-overdue-${plan.id}-${date}`
-    : `book-reading-${plan.id}`;
-  checkbox.addEventListener("change", () => toggleBookReadingCompletion(plan.id, date));
+  checkbox.disabled = reading.skipped || plan.status === "paused";
+  checkbox.id = `book-reading-${reading.item_id}`;
+  checkbox.addEventListener("change", () => toggleBookReadingCompletion(reading.item_id, getSelectedScheduleDate()));
   const label = document.createElement("label");
   label.htmlFor = checkbox.id;
   const planTitle = document.createElement("span");
@@ -1914,8 +2039,10 @@ function appendBookReadingItem(list, plan, reading, date, overdue = false) {
 
 function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlans = []) {
   renderBookPlanSettings(plans);
-  const scheduled = plans.filter((plan) => plan.today_reading);
-  const done = scheduled.filter((plan) => plan.today_reading.completed).length;
+  const scheduled = plans.filter((plan) => ["active", "completed"].includes(plan.status)).flatMap((plan) => (
+    (plan.readings || []).map((reading) => ({ plan, reading }))
+  ));
+  const done = scheduled.filter(({ reading }) => reading.completed).length;
   const percent = scheduled.length ? Math.round((done / scheduled.length) * 100) : 0;
   const dateLabel = date === dateKeyInNewYork() ? "today" : formatDate(date);
   elements.bookPlanProgressLabel.textContent = plans.length
@@ -1931,7 +2058,7 @@ function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlan
       ? "All book reading plans are complete. View them in the Library archive."
       : "No book reading plans yet. Use Book plan settings to create one.";
 
-  const next = plans
+  const next = plans.filter((plan) => plan.status === "active")
     .filter((plan) => plan.next_reading)
     .map((plan) => ({ ...plan.next_reading, title: plan.title }))
     .sort((left, right) => left.date.localeCompare(right.date))[0];
@@ -1940,18 +2067,18 @@ function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlan
     ? `Next planned: ${formatDate(next.date)} · ${next.reference} (${next.title})`
     : "";
 
-  scheduled.forEach((plan) => appendBookReadingItem(
+  scheduled.forEach(({ plan, reading }) => appendBookReadingItem(
     elements.bookPlanTodayList,
     plan,
-    plan.today_reading,
+    reading,
     date,
   ));
   elements.bookPlanOverdueList.replaceChildren();
   elements.bookPlanOverdueSection.hidden = overdueReadings.length === 0;
   overdueReadings.forEach((reading) => appendBookReadingItem(
     elements.bookPlanOverdueList,
-    { id: reading.plan_id, title: reading.title, collaborator_email: reading.collaborator_email },
-    { reference: reading.reference, completed: false },
+    { id: reading.plan_id, title: reading.title, collaborator_email: reading.collaborator_email, status: "active" },
+    { item_id: reading.item_id, reference: reading.reference, completed: false, skipped: false },
     reading.scheduled_date,
     true,
   ));
@@ -1960,7 +2087,7 @@ function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlan
 function renderBookPlanSettings(plans) {
   elements.bookPlanList.replaceChildren();
   elements.bookPlansEmpty.hidden = plans.length > 0;
-  elements.bookPlansEmpty.textContent = "No active book reading plans. Create one here, or view archived plans in the Library.";
+  elements.bookPlansEmpty.textContent = "No active or paused book reading plans. Create one here, or view archived plans in the Library.";
   plans.forEach((plan) => {
     const row = document.createElement("li");
     row.className = "book-plan-item";
@@ -1976,6 +2103,10 @@ function renderBookPlanSettings(plans) {
     progress.className = "book-plan-progress muted";
     progress.textContent = `${plan.completed_readings} of ${plan.total_readings} readings complete`;
     details.append(title, schedule, progress);
+    const status = document.createElement("span");
+    status.className = `plan-badge ${plan.status === "paused" || plan.status === "archived" ? "cancelled" : "completed"}`;
+    status.textContent = plan.status === "paused" ? "Paused" : plan.status === "completed" ? "Completed" : "Active";
+    details.append(status);
 
     if (plan.collaborator_email) {
       const shared = document.createElement("span");
@@ -1993,18 +2124,214 @@ function renderBookPlanSettings(plans) {
     edit.type = "button";
     edit.className = "button button-quiet";
     edit.textContent = "Edit";
+    edit.disabled = plan.status === "completed";
+    edit.title = plan.status === "completed" ? "Add a one-off item to extend this completed plan." : "Edit plan metadata and regenerate pending items.";
     edit.addEventListener("click", () => editBookReadingPlan(plan));
+
+    const pause = document.createElement("button");
+    pause.type = "button";
+    pause.className = "button button-quiet";
+    pause.textContent = plan.status === "paused" ? "Resume" : "Pause";
+    pause.disabled = plan.status === "completed";
+    pause.addEventListener("click", () => updateBookPlanStatus(plan, plan.status === "paused" ? "active" : "paused"));
+
+    const reschedule = document.createElement("form");
+    reschedule.className = "plan-reschedule-form";
+    const fromDate = document.createElement("input");
+    fromDate.type = "date";
+    fromDate.required = true;
+    fromDate.value = getSelectedScheduleDate();
+    fromDate.setAttribute("aria-label", `Reschedule remaining items in ${plan.title} from date`);
+    const rescheduleButton = document.createElement("button");
+    rescheduleButton.type = "submit";
+    rescheduleButton.className = "button button-quiet";
+    rescheduleButton.textContent = "Reschedule remaining from date";
+    reschedule.append(fromDate, rescheduleButton);
+    reschedule.addEventListener("submit", (event) => {
+      event.preventDefault();
+      rescheduleBookPlan(plan, fromDate.value);
+    });
 
     const archive = document.createElement("button");
     archive.type = "button";
     archive.className = "button button-quiet button-warning";
     archive.textContent = "Archive";
+    archive.disabled = plan.status === "completed";
     archive.title = "Move this plan to the reading plan archive";
     archive.addEventListener("click", () => archiveBookPlan(plan));
-    actions.append(edit, archive);
+    actions.append(edit, pause, archive);
     row.append(details, actions);
+    row.append(renderPlanQueue(plan));
+    row.append(reschedule, renderAddPlanItemForm(plan));
     elements.bookPlanList.append(row);
   });
+}
+
+function renderPlanQueue(plan) {
+  const list = document.createElement("ul");
+  list.className = "plan-item-editor-list";
+  list.setAttribute("aria-label", `${plan.title} queued readings`);
+  const pendingItems = plan.plan_items.filter((item) => item.status === "pending");
+  plan.plan_items.forEach((item) => {
+    const row = document.createElement("li");
+    row.className = `plan-item-editor plan-item-${item.status}`;
+    const selections = document.createElement("input");
+    selections.value = formatSelectedChapters(item.chapter_selections);
+    selections.setAttribute("aria-label", "Chapter selections");
+    const date = document.createElement("input");
+    date.type = "date";
+    date.value = item.scheduled_date || "";
+    date.setAttribute("aria-label", "Scheduled date");
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "button button-quiet";
+    save.textContent = "Save";
+    save.addEventListener("click", () => savePlanItem(item, {
+      chapter_selections: selections.value,
+      scheduled_date: date.value || null,
+    }));
+    const status = document.createElement("span");
+    status.className = "reading-date";
+    status.textContent = item.status === "completed"
+      ? `Completed ${formatDate(item.completed_date)}`
+      : item.status === "skipped" ? "Skipped" : "Pending";
+    row.append(selections, date, status, save);
+    if (item.status === "pending") {
+      const skip = document.createElement("button");
+      skip.type = "button";
+      skip.className = "button button-quiet";
+      skip.textContent = "Skip";
+      skip.addEventListener("click", () => savePlanItem(item, { status: "skipped" }));
+      const up = document.createElement("button");
+      up.type = "button";
+      up.className = "button button-quiet";
+      up.textContent = "↑";
+      const pendingIndex = pendingItems.findIndex((candidate) => candidate.id === item.id);
+      up.disabled = pendingIndex === 0;
+      up.setAttribute("aria-label", "Move reading earlier");
+      up.addEventListener("click", () => movePlanItem(item, -1, plan.plan_items));
+      const down = document.createElement("button");
+      down.type = "button";
+      down.className = "button button-quiet";
+      down.textContent = "↓";
+      down.disabled = pendingIndex === pendingItems.length - 1;
+      down.setAttribute("aria-label", "Move reading later");
+      down.addEventListener("click", () => movePlanItem(item, 1, plan.plan_items));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "button button-danger";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => removePlanItem(item));
+      row.append(skip, up, down, remove);
+    } else if (item.status === "skipped") {
+      const restore = document.createElement("button");
+      restore.type = "button";
+      restore.className = "button button-quiet";
+      restore.textContent = "Restore";
+      restore.addEventListener("click", () => savePlanItem(item, { status: "pending" }));
+      row.append(restore);
+    }
+    list.append(row);
+  });
+  return list;
+}
+
+function renderAddPlanItemForm(plan) {
+  const form = document.createElement("form");
+  form.className = "plan-add-item-form";
+  const selections = document.createElement("input");
+  selections.required = true;
+  selections.placeholder = "Genesis 1-2; Psalm 1";
+  selections.setAttribute("aria-label", "Custom reading chapters");
+  const date = document.createElement("input");
+  date.type = "date";
+  date.setAttribute("aria-label", "Custom reading date");
+  const add = document.createElement("button");
+  add.type = "submit";
+  add.className = "button button-quiet";
+  add.textContent = "Add one-off reading";
+  form.append(selections, date, add);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    add.disabled = true;
+    try {
+      await requestJson(`/api/book-reading-plans/${plan.id}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chapter_selections: selections.value, scheduled_date: date.value || null }),
+      });
+      await loadBookReadingPlans();
+      showToast("Custom reading added to the plan.");
+    } catch (error) {
+      showToast(error.message, true);
+      add.disabled = false;
+    }
+  });
+  return form;
+}
+
+async function savePlanItem(item, values) {
+  try {
+    await requestJson(`/api/reading-plan-items/${item.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    });
+    await loadBookReadingPlans();
+    showToast("Reading plan item updated.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function movePlanItem(item, direction, items) {
+  const pending = items.filter((candidate) => candidate.status === "pending");
+  const index = pending.findIndex((candidate) => candidate.id === item.id);
+  const target = pending[index + direction];
+  if (!target) return;
+  try {
+    await Promise.all([
+      requestJson(`/api/reading-plan-items/${item.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sort_order: target.sort_order }),
+      }),
+      requestJson(`/api/reading-plan-items/${target.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sort_order: item.sort_order }),
+      }),
+    ]);
+    await loadBookReadingPlans();
+  } catch (error) { showToast(error.message, true); }
+}
+
+async function removePlanItem(item) {
+  if (!window.confirm("Remove this pending reading from the plan?")) return;
+  try {
+    await requestJson(`/api/reading-plan-items/${item.id}`, { method: "DELETE" });
+    await loadBookReadingPlans();
+  } catch (error) { showToast(error.message, true); }
+}
+
+async function rescheduleBookPlan(plan, startDate) {
+  try {
+    await requestJson(`/api/book-reading-plans/${plan.id}/reschedule`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start_date: startDate }),
+    });
+    await loadBookReadingPlans();
+    showToast("Remaining readings rescheduled.");
+  } catch (error) { showToast(error.message, true); }
+}
+
+async function updateBookPlanStatus(plan, status) {
+  try {
+    await requestJson(`/api/book-reading-plans/${plan.id}/status`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    await loadBookReadingPlans();
+    showToast(status === "paused" ? "Reading plan paused." : "Reading plan resumed.");
+  } catch (error) { showToast(error.message, true); }
 }
 
 function renderCompletedReadingPlans(plans, error = "", cancelledPlans = []) {
@@ -2026,7 +2353,7 @@ function renderCompletedReadingPlans(plans, error = "", cancelledPlans = []) {
     scope.textContent = plan.reading_scope;
     const progress = document.createElement("p");
     progress.className = "book-plan-progress muted";
-    progress.textContent = `Completed all ${plan.total_readings} readings · ${plan.total_chapters} chapters`;
+    progress.textContent = `Completed ${plan.completed_readings} of ${plan.total_readings} readings · ${plan.completed_chapters} chapters`;
     const badge = document.createElement("span");
     badge.className = "plan-badge completed";
     badge.textContent = "Completed";
@@ -2055,8 +2382,7 @@ function renderCompletedReadingPlans(plans, error = "", cancelledPlans = []) {
     scope.textContent = plan.reading_scope;
     const progress = document.createElement("p");
     progress.className = "book-plan-progress muted";
-    const chaptersRead = Math.min(plan.total_chapters, plan.completed_readings * plan.chapters_per_reading);
-    progress.textContent = `Archived · ${plan.completed_readings} of ${plan.total_readings} readings completed (${chaptersRead} chapters)`;
+    progress.textContent = `Archived · ${plan.completed_readings} of ${plan.total_readings} readings completed (${plan.completed_chapters} chapters)`;
     const badge = document.createElement("span");
     badge.className = "plan-badge cancelled";
     badge.textContent = "Archived";
@@ -2195,23 +2521,39 @@ function addBookPlanBook() {
 }
 
 function updateBookPlanMode() {
+  const customQueue = elements.bookPlanMode.value === "custom";
   const choosingChapters = elements.bookPlanMode.value === "chapters";
-  elements.bookPlanBooksField.hidden = choosingChapters;
+  elements.bookPlanTitle.required = customQueue;
+  elements.bookPlanBooksField.hidden = choosingChapters || customQueue;
   elements.bookPlanSelectionsField.hidden = !choosingChapters;
   elements.bookPlanSelections.required = choosingChapters;
+  for (const selector of [
+    "#book-plan-chapters", "#book-plan-cadence-type", "#book-plan-start-date",
+  ]) {
+    const field = document.querySelector(selector);
+    if (field) field.closest("label") ? field.closest("label").hidden = customQueue : field.hidden = customQueue;
+  }
+  elements.bookPlanPreview.hidden = customQueue;
+  updateBookPlanCadenceUI();
   updateBookPlanPreview();
 }
 
 function updateBookPlanCadenceUI() {
+  const customQueue = elements.bookPlanMode.value === "custom";
   const isWeekdays = elements.bookPlanCadenceType.value === "weekdays";
-  elements.bookPlanIntervalField.hidden = isWeekdays;
+  elements.bookPlanIntervalField.hidden = isWeekdays || customQueue;
   elements.bookPlanInterval.required = !isWeekdays;
-  elements.bookPlanWeekdaysField.hidden = !isWeekdays;
+  elements.bookPlanWeekdaysField.hidden = !isWeekdays || customQueue;
   updateBookPlanPreview();
 }
 
 function updateBookPlanPreview() {
   if (!elements.bookPlanPreviewSummary) return;
+  if (elements.bookPlanMode.value === "custom") {
+    elements.bookPlanPreviewSummary.textContent = "Create an empty plan, then add custom readings and dates from the queue below.";
+    elements.bookPlanPreviewFinish.textContent = "";
+    return;
+  }
   try {
     const mode = elements.bookPlanMode.value;
     let chaptersCount = 0;
@@ -2294,8 +2636,8 @@ function editBookReadingPlan(plan) {
   elements.bookPlanSettingsButton.setAttribute("aria-expanded", "true");
   elements.bookPlanEditId.value = plan.id;
   elements.bookPlanTitle.value = plan.title;
-  elements.bookPlanMode.value = plan.chapter_selections?.length ? "chapters" : "books";
-  state.selectedBookPlanBooks = plan.chapter_selections?.length ? [] : [...plan.books];
+  elements.bookPlanMode.value = plan.chapter_selections?.length ? "chapters" : plan.books?.length ? "books" : "custom";
+  state.selectedBookPlanBooks = plan.chapter_selections?.length || !plan.books?.length ? [] : [...plan.books];
   renderBookPlanSelectedBooks();
   elements.bookPlanSelections.value = formatSelectedChapters(plan.chapter_selections);
   elements.bookPlanChapters.value = plan.chapters_per_reading;
@@ -2306,13 +2648,11 @@ function editBookReadingPlan(plan) {
     checkbox.checked = planWeekdays.includes(Number(checkbox.value));
   });
   elements.bookPlanPartnerEmail.value = plan.collaborator_email || "";
-  elements.bookPlanStartDate.value = plan.start_date;
+  elements.bookPlanStartDate.value = plan.plan_items.find((item) => item.status === "pending")?.scheduled_date || plan.start_date;
   elements.bookPlanSaveButton.textContent = "Save changes";
-  elements.bookPlanEditWarning.hidden = false;
   updateBookPlanCadenceUI();
   updateBookPlanMode();
   updateBookPlanPreview();
-  state.bookPlanOriginal = bookPlanScheduleValues();
   elements.bookPlanTitle.focus();
 }
 
@@ -2320,7 +2660,6 @@ function resetBookPlanForm() {
   elements.bookPlanForm.reset();
   elements.bookPlanEditId.value = "";
   elements.bookPlanSaveButton.textContent = "Create plan";
-  elements.bookPlanEditWarning.hidden = true;
   elements.bookPlanStartDate.value = dateKeyInNewYork();
   elements.bookPlanCadenceType.value = "interval";
   elements.bookPlanInterval.value = "1";
@@ -2330,7 +2669,6 @@ function resetBookPlanForm() {
   elements.bookPlanPartnerEmail.value = "";
   state.selectedBookPlanBooks = [];
   renderBookPlanSelectedBooks();
-  state.bookPlanOriginal = null;
   updateBookPlanCadenceUI();
   updateBookPlanMode();
   updateBookPlanPreview();
@@ -2340,8 +2678,6 @@ async function saveBookReadingPlan(event) {
   event.preventDefault();
   const id = elements.bookPlanEditId.value;
   const schedule = bookPlanScheduleValues();
-  const scheduleChanged = id && JSON.stringify(schedule) !== JSON.stringify(state.bookPlanOriginal);
-  if (scheduleChanged && !window.confirm("Changing this plan's passages, pace, or start date will reset its completion history. Continue?")) return;
   const payload = {
     title: elements.bookPlanTitle.value,
     ...schedule,
@@ -2360,16 +2696,14 @@ async function saveBookReadingPlan(event) {
   }
 }
 
-async function toggleBookReadingCompletion(id, date) {
+async function toggleBookReadingCompletion(itemId, date) {
   try {
-    const result = await requestJson(`/api/book-reading-plans/${id}/toggle?date=${date}`, { method: "POST" });
+    const result = await requestJson(`/api/reading-plan-items/${itemId}/toggle?date=${date}`, { method: "POST" });
     if (result.completed && date < dateKeyInNewYork()) showToast("Overdue reading marked complete.");
-    await loadBookReadingPlans();
-    await loadTodayReadingStatus();
+    await Promise.all([loadBookReadingPlans(), loadReadingLogs(), loadTodayReadingStatus(), loadReadingStatisticsIfVisible()]);
   } catch (error) {
     showToast(error.message, true);
-    await loadBookReadingPlans();
-    await loadTodayReadingStatus();
+    await Promise.all([loadBookReadingPlans(), loadReadingLogs(), loadTodayReadingStatus()]);
   }
 }
 
@@ -2387,7 +2721,7 @@ async function saveQuickChapterReading(event) {
     });
     elements.quickReadingForm.reset();
     showToast(`Logged ${result.reference} for ${formatDate(result.read_date)}.`);
-    await loadTodayReadingStatus();
+    await Promise.all([loadReadingLogs(), loadTodayReadingStatus(), loadReadingStatisticsIfVisible()]);
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -2410,7 +2744,7 @@ async function archiveBookPlan(plan) {
 }
 
 async function deleteBookReadingPlan(plan) {
-  if (!window.confirm(`Permanently delete archived reading plan “${plan.title}” and its completion history?`)) return;
+  if (!window.confirm(`Delete archived or completed reading plan “${plan.title}”? Existing reading logs will remain in your statistics.`)) return;
   try {
     await requestJson(`/api/book-reading-plans/${plan.id}`, { method: "DELETE" });
     await loadBookReadingPlans();
@@ -2650,12 +2984,6 @@ updateTaskCadenceUI();
 if (elements.scheduleDate) {
   elements.scheduleDate.addEventListener("change", () => {
     setSelectedScheduleDate(elements.scheduleDate.value);
-    loadReadingPlan();
-  });
-}
-if (elements.bookPlanDate) {
-  elements.bookPlanDate.addEventListener("change", () => {
-    setSelectedScheduleDate(elements.bookPlanDate.value);
     loadReadingPlan();
   });
 }

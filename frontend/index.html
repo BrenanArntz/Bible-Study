@@ -375,7 +375,7 @@
             <form id="book-plan-form" class="book-plan-form">
               <input id="book-plan-edit-id" type="hidden">
               <label>Plan name (optional)<input id="book-plan-title" maxlength="120" placeholder="Defaults to the selected books"></label>
-              <label>Plan type<select id="book-plan-mode"><option value="books">Read whole books</option><option value="chapters">Choose specific chapters</option></select></label>
+              <label>Plan type<select id="book-plan-mode"><option value="books">Read whole books</option><option value="chapters">Choose specific chapters</option><option value="custom">Build a custom queue</option></select></label>
               <div id="book-plan-books-field" class="book-plan-books-field">
                 <span>Books in order</span>
                 <div class="book-plan-book-picker">
@@ -428,7 +428,6 @@
                 <button class="button button-primary" id="book-plan-save-button" type="submit">Create plan</button>
                 <button class="button button-quiet" id="book-plan-cancel" type="button">Cancel</button>
               </div>
-              <p class="book-plan-edit-warning muted" id="book-plan-edit-warning" hidden>Changing the passages, pace, or start date resets this plan's completion history.</p>
             </form>
             <p class="empty-state" id="book-plans-empty" hidden></p>
             <ul class="book-plan-list" id="book-plan-list" aria-live="polite"></ul>
@@ -459,12 +458,20 @@
             <p class="today-upcoming muted" id="book-plan-upcoming" hidden></p>
           </section>
 
+          <section class="today-plan-card panel-card logged-readings-card" aria-labelledby="logged-readings-title">
+            <div class="panel-heading">
+              <div><p class="eyebrow">READING HISTORY</p><h2 id="logged-readings-title">Logged on selected date</h2></div>
+            </div>
+            <p class="empty-state" id="reading-logs-empty" hidden></p>
+            <ul class="reading-list" id="reading-logs-list" aria-live="polite"></ul>
+          </section>
+
           <!-- Manually log chapters outside a reading plan -->
           <section class="today-plan-card panel-card quick-reading-card" aria-labelledby="quick-reading-title">
             <div class="panel-heading">
-              <div><p class="eyebrow">EXTRA READING</p><h2 id="quick-reading-title">Log chapters read today</h2></div>
+              <div><p class="eyebrow">EXTRA READING</p><h2 id="quick-reading-title">Log chapters for selected date</h2></div>
             </div>
-            <p class="muted quick-reading-hint">Add chapters even if they aren't part of a reading plan.</p>
+            <p class="muted quick-reading-hint">Add chapters even if they aren't part of a reading plan. The selected Schedule date is used.</p>
             <form id="quick-reading-form" class="quick-reading-form">
               <label for="quick-reading-selections">Chapters read
                 <input id="quick-reading-selections" name="chapters" required placeholder="Genesis 1-3; John 3">
@@ -489,8 +496,8 @@
           <div class="page-heading">
             <div>
               <p class="eyebrow">YOUR STUDY OVER TIME</p>
-              <h1 id="stats-title">Reading Stats [Since Nov. 2026]</h1>
-              <p class="subheading">Completed Book reading plan checkmarks and extra chapters logged in Today count here. Re-reading a chapter counts again.</p>
+              <h1 id="stats-title">Reading Stats</h1>
+              <p class="subheading">Every plan check-off and manual reading log counts here. Re-reading a chapter counts again.</p>
             </div>
             <button class="button button-quiet" id="stats-refresh-button" type="button">Refresh stats</button>
           </div>
