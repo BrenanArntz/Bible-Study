@@ -68,6 +68,8 @@ const elements = {
   prayerNewCategoryField: document.querySelector("#prayer-new-category-field"),
   prayerNewCategory: document.querySelector("#prayer-new-category"),
   prayerScriptureRef: document.querySelector("#prayer-scripture-ref"),
+  prayerShareUsers: document.querySelector("#prayer-share-users"),
+  prayerShareUsersHelp: document.querySelector("#prayer-share-users-help"),
   prayerSharedEmail: document.querySelector("#prayer-shared-email"),
   prayerPin: document.querySelector("#prayer-pin"),
   prayerSaveButton: document.querySelector("#prayer-save-button"),
@@ -2922,12 +2924,20 @@ function createPrayerSummary(prayer, showRequestedDate = false) {
   category.className = "prayer-badge";
   category.textContent = prayer.category_name || "General";
   summary.append(category);
-  if (prayer.shared_with_email) {
+  const sharedUserIds = Array.isArray(prayer.shared_with_user_ids) ? prayer.shared_with_user_ids : [];
+  if (prayer.shared_with_email || sharedUserIds.length) {
     const shared = document.createElement("span");
     shared.className = "prayer-badge shared";
-    shared.textContent = prayer.user_id === state.userId
-      ? "Shared"
-      : `Shared by ${prayer.owner_email || "spouse"}`;
+    if (prayer.user_id === state.userId) {
+      const accountNames = sharedUserIds.map((userId) => (
+        state.registeredPartners.find((account) => account.user_id === userId)?.display_name
+        || (userId === state.userId ? "your account" : "registered account")
+      ));
+      if (prayer.shared_with_email) accountNames.push(prayer.shared_with_email);
+      shared.textContent = accountNames.length ? `Shared with ${accountNames.join(", ")}` : "Shared";
+    } else {
+      shared.textContent = `Shared by ${prayer.owner_email || "a spouse"}`;
+    }
     summary.append(shared);
   }
   if (prayer.is_pinned) {
@@ -3035,6 +3045,43 @@ function renderPrayerCategoryOptions() {
     .some((option) => option.value === selectedFilter) ? selectedFilter : "all";
 }
 
+function renderPrayerShareOptions(selectedUserIds, canEdit) {
+  const selectedIds = selectedUserIds || [...elements.prayerShareUsers.querySelectorAll("input:checked")]
+    .map((checkbox) => checkbox.value);
+  const selected = new Set(selectedIds);
+  const editingOwnerId = elements.prayerForm.dataset.prayerOwnerUserId;
+  const editable = canEdit ?? (!editingOwnerId || editingOwnerId === state.userId);
+  const accounts = state.registeredPartners.filter((account) => account.user_id !== state.userId);
+  const availableIds = new Set(accounts.map((account) => account.user_id));
+  elements.prayerShareUsers.replaceChildren();
+  const appendAccount = (userId, name) => {
+    const label = document.createElement("label");
+    label.className = "prayer-share-user-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = userId;
+    checkbox.checked = selected.has(userId);
+    checkbox.disabled = !editable;
+    label.append(checkbox, document.createTextNode(name));
+    elements.prayerShareUsers.append(label);
+  };
+  accounts.forEach((account) => appendAccount(account.user_id, account.display_name));
+  [...selected].filter((userId) => !availableIds.has(userId)).forEach((userId) => {
+    appendAccount(userId, userId === state.userId ? state.displayName || "Your account" : "Unavailable account");
+  });
+  if (!accounts.length && !selected.size) {
+    const empty = document.createElement("span");
+    empty.className = "muted";
+    empty.textContent = "No other registered accounts available.";
+    elements.prayerShareUsers.append(empty);
+  }
+  elements.prayerShareUsersHelp.textContent = state.registeredPartnerError
+    ? `Could not load registered accounts: ${state.registeredPartnerError}`
+    : editable
+      ? "Check the name of anyone you want to share this prayer with."
+      : "Only the prayer owner can change who this prayer is shared with.";
+}
+
 function renderPrayerCategories() {
   elements.prayerCategoryList.replaceChildren();
   if (!state.prayerCategories.length) {
@@ -3077,7 +3124,7 @@ function renderPrayerList() {
   const search = elements.prayerSearch.value.trim().toLocaleLowerCase();
   const filtered = active.filter((prayer) => {
     if (filter === "pinned" && !prayer.is_pinned) return false;
-    if (filter === "shared" && !prayer.shared_with_email) return false;
+    if (filter === "shared" && !prayer.shared_with_email && !prayer.shared_with_user_ids?.length) return false;
     if (filter.startsWith("category:") && prayer.category_name !== filter.slice("category:".length)) return false;
     if (search) {
       const haystack = [
@@ -3118,6 +3165,7 @@ function renderPrayerList() {
   elements.prayerArchiveEmpty.hidden = archived.length > 0;
   elements.prayerArchiveEmpty.textContent = "Answered prayers will appear here.";
   renderPrayerCategoryOptions();
+  renderPrayerShareOptions();
   renderPrayerCategories();
   renderPinnedPrayers();
 }
@@ -3162,7 +3210,11 @@ async function loadPrayers() {
 
 function resetPrayerForm() {
   elements.prayerForm.reset();
+  delete elements.prayerForm.dataset.prayerOwnerUserId;
+  elements.prayerShareUsers.replaceChildren();
+  elements.prayerShareUsersHelp.textContent = "Sign in to load registered accounts.";
   elements.prayerEditId.value = "";
+  delete elements.prayerForm.dataset.prayerOwnerUserId;
   elements.prayerFormTitle.textContent = "Add a prayer";
   elements.prayerSaveButton.textContent = "Save prayer";
   elements.prayerNewCategoryField.hidden = true;
@@ -3172,12 +3224,14 @@ function resetPrayerForm() {
   elements.prayerAddToggle.setAttribute("aria-expanded", "false");
   elements.prayerFormPanel.hidden = true;
   renderPrayerCategoryOptions();
+  renderPrayerShareOptions([], true);
 }
 
 function editPrayer(prayer) {
   elements.prayerFormPanel.hidden = false;
   elements.prayerAddToggle.setAttribute("aria-expanded", "true");
   elements.prayerEditId.value = prayer.id;
+  elements.prayerForm.dataset.prayerOwnerUserId = prayer.user_id;
   elements.prayerFormTitle.textContent = "Edit prayer";
   elements.prayerSaveButton.textContent = "Save changes";
   elements.prayerTitle.value = prayer.title;
@@ -3191,6 +3245,7 @@ function editPrayer(prayer) {
   elements.prayerSharedEmail.value = prayer.shared_with_email || "";
   elements.prayerSharedEmail.disabled = prayer.user_id !== state.userId;
   elements.prayerPin.checked = Boolean(prayer.is_pinned);
+  renderPrayerShareOptions(prayer.shared_with_user_ids || [], prayer.user_id === state.userId);
   elements.prayerTitle.focus();
 }
 
@@ -3220,6 +3275,8 @@ async function submitPrayerForm(event) {
         details: elements.prayerDetails.value,
         category_name: categoryName,
         scripture_ref: elements.prayerScriptureRef.value,
+        shared_with_user_ids: [...elements.prayerShareUsers.querySelectorAll("input:checked")]
+          .map((checkbox) => checkbox.value),
         shared_with_email: elements.prayerSharedEmail.value,
         is_pinned: elements.prayerPin.checked,
       }),
@@ -3975,6 +4032,8 @@ async function loadRegisteredReadingPartners() {
     state.registeredPartnerError = error.message;
   }
   renderReaderProfileSelectors();
+  renderPrayerShareOptions();
+  if (state.prayers.length) renderPrayerList();
 }
 
 function renderReaderProfileSelectors() {

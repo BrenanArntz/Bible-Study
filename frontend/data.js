@@ -1785,10 +1785,24 @@ async function deletePrayerCategory(id) {
 
 async function listPrayers() {
   const { data, error } = await supabase.from("prayers")
-    .select("id,user_id,owner_email,shared_with_email,category_name,title,details,scripture_ref,is_pinned,pray_count,last_prayed_at,updates,status,answered_at,answer_note,created_at")
+    .select("id,user_id,owner_email,shared_with_email,shared_with_user_ids,category_name,title,details,scripture_ref,is_pinned,pray_count,last_prayed_at,updates,status,answered_at,answer_note,created_at")
     .order("created_at", { ascending: false });
   if (error) return fail(error, "Could not load prayers");
   return data || [];
+}
+
+async function validatePrayerShareUsers(value, ownerId) {
+  const userIds = [...new Set((Array.isArray(value) ? value : []).map((userId) => String(userId).trim().toLowerCase()))];
+  if (userIds.some((userId) => !UUID_PATTERN.test(userId))) throw new Error("Choose valid registered accounts to share with.");
+  if (userIds.includes(ownerId)) throw new Error("You cannot share a prayer with your own account.");
+  if (userIds.length) {
+    const accounts = await registeredReadingPartners();
+    const availableIds = new Set(accounts.map((account) => account.user_id));
+    if (userIds.some((userId) => !availableIds.has(userId))) {
+      throw new Error("Choose only registered accounts available for sharing.");
+    }
+  }
+  return userIds;
 }
 
 async function savePrayer(payload, id = "") {
@@ -1807,6 +1821,7 @@ async function savePrayer(payload, id = "") {
     category_name: categoryName,
     scripture_ref: validateScriptureReference(payload.scripture_ref),
     shared_with_email: sharedEmail || null,
+    shared_with_user_ids: [],
     is_pinned: Boolean(payload.is_pinned),
   };
   let query;
@@ -1815,13 +1830,19 @@ async function savePrayer(payload, id = "") {
     const { data: existing, error: readError } = await supabase.from("prayers")
       .select("user_id").eq("id", id).single();
     if (readError) return fail(readError, "Could not load prayer before editing");
-    if (existing.user_id !== user.id) delete values.shared_with_email;
+    if (existing.user_id !== user.id) {
+      delete values.shared_with_email;
+      delete values.shared_with_user_ids;
+    } else {
+      values.shared_with_user_ids = await validatePrayerShareUsers(payload.shared_with_user_ids, user.id);
+    }
     query = supabase.from("prayers").update(values).eq("id", id);
   } else {
+    values.shared_with_user_ids = await validatePrayerShareUsers(payload.shared_with_user_ids, user.id);
     query = supabase.from("prayers").insert({ ...values, user_id: user.id, owner_email: user.email || null });
   }
   const { data, error } = await query
-    .select("id,user_id,owner_email,shared_with_email,category_name,title,details,scripture_ref,is_pinned,pray_count,last_prayed_at,updates,status,answered_at,answer_note,created_at")
+    .select("id,user_id,owner_email,shared_with_email,shared_with_user_ids,category_name,title,details,scripture_ref,is_pinned,pray_count,last_prayed_at,updates,status,answered_at,answer_note,created_at")
     .single();
   if (error) return fail(error, "Could not save prayer");
   return data;

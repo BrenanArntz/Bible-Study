@@ -16,6 +16,7 @@ create table if not exists public.prayers (
     user_id uuid not null references auth.users (id) on delete cascade,
     owner_email text,
     shared_with_email text,
+    shared_with_user_ids uuid[] not null default '{}',
     category_name text not null default 'General' check (length(btrim(category_name)) between 1 and 60),
     title text not null check (length(btrim(title)) between 1 and 160),
     details text not null default '' check (length(details) <= 8000),
@@ -37,11 +38,16 @@ create table if not exists public.prayers (
     )
 );
 
+alter table public.prayers
+    add column if not exists shared_with_user_ids uuid[] not null default '{}';
+
 create index if not exists prayers_user_status_idx
     on public.prayers (user_id, status, created_at desc);
 create index if not exists prayers_shared_email_idx
     on public.prayers (lower(shared_with_email))
     where shared_with_email is not null;
+create index if not exists prayers_shared_users_idx
+    on public.prayers using gin (shared_with_user_ids);
 
 grant select, insert, update, delete on public.prayer_categories to authenticated;
 grant select, insert, update, delete on public.prayers to authenticated;
@@ -61,6 +67,7 @@ create policy "Users read accessible prayers"
     using (
         (select auth.uid()) = user_id
         or lower(coalesce((select auth.jwt() ->> 'email'), '')) = lower(coalesce(shared_with_email, ''))
+        or (select auth.uid()) = any(coalesce(shared_with_user_ids, '{}'::uuid[]))
     );
 
 drop policy if exists "Users insert accessible prayers" on public.prayers;
@@ -69,6 +76,7 @@ create policy "Users insert accessible prayers"
     with check (
         (select auth.uid()) = user_id
         or lower(coalesce((select auth.jwt() ->> 'email'), '')) = lower(coalesce(shared_with_email, ''))
+        or (select auth.uid()) = any(coalesce(shared_with_user_ids, '{}'::uuid[]))
     );
 
 drop policy if exists "Users update accessible prayers" on public.prayers;
@@ -77,10 +85,12 @@ create policy "Users update accessible prayers"
     using (
         (select auth.uid()) = user_id
         or lower(coalesce((select auth.jwt() ->> 'email'), '')) = lower(coalesce(shared_with_email, ''))
+        or (select auth.uid()) = any(coalesce(shared_with_user_ids, '{}'::uuid[]))
     )
     with check (
         (select auth.uid()) = user_id
         or lower(coalesce((select auth.jwt() ->> 'email'), '')) = lower(coalesce(shared_with_email, ''))
+        or (select auth.uid()) = any(coalesce(shared_with_user_ids, '{}'::uuid[]))
     );
 
 drop policy if exists "Users delete accessible prayers" on public.prayers;
@@ -89,7 +99,32 @@ create policy "Users delete accessible prayers"
     using (
         (select auth.uid()) = user_id
         or lower(coalesce((select auth.jwt() ->> 'email'), '')) = lower(coalesce(shared_with_email, ''))
+        or (select auth.uid()) = any(coalesce(shared_with_user_ids, '{}'::uuid[]))
     );
+
+create or replace function public.prayer_shared_accounts_are_registered(p_user_ids uuid[])
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth, pg_temp
+as $$
+    select not exists (
+        select 1
+        from unnest(coalesce(p_user_ids, '{}'::uuid[])) as partner(user_id)
+        where partner.user_id = (select auth.uid())
+           or not exists (
+               select 1
+               from auth.users account
+               where account.id = partner.user_id
+                 and account.email is not null
+                 and account.email_confirmed_at is not null
+           )
+    );
+$$;
+
+revoke all on function public.prayer_shared_accounts_are_registered(uuid[]) from public, anon;
+grant execute on function public.prayer_shared_accounts_are_registered(uuid[]) to authenticated;
 
 create or replace function public.guard_prayer_ownership()
 returns trigger
@@ -102,6 +137,9 @@ begin
         if new.user_id is distinct from (select auth.uid()) then
             raise exception 'New prayers must belong to the signed-in user.';
         end if;
+        if not public.prayer_shared_accounts_are_registered(new.shared_with_user_ids) then
+            raise exception 'Choose registered accounts other than your own.';
+        end if;
         return new;
     end if;
     if new.user_id is distinct from old.user_id
@@ -109,8 +147,15 @@ begin
         raise exception 'Prayer ownership cannot be changed.';
     end if;
     if old.user_id is distinct from (select auth.uid())
-       and new.shared_with_email is distinct from old.shared_with_email then
+       and (
+           new.shared_with_email is distinct from old.shared_with_email
+           or new.shared_with_user_ids is distinct from old.shared_with_user_ids
+       ) then
         raise exception 'Only the prayer owner can change sharing.';
+    end if;
+    if new.shared_with_user_ids is distinct from old.shared_with_user_ids
+       and not public.prayer_shared_accounts_are_registered(new.shared_with_user_ids) then
+        raise exception 'Choose registered accounts other than your own.';
     end if;
     return new;
 end;

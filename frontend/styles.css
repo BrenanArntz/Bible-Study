@@ -255,6 +255,12 @@ code { color: var(--accent); font-size: .95em; }
 .prayer-form-panel .panel-heading, .prayer-categories-panel .panel-heading { margin-bottom: 15px; }
 .prayer-form, .prayer-category-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .prayer-form > label, .prayer-category-form > label { display: grid; min-width: 0; gap: 6px; color: var(--muted); font-size: 11px; }
+.prayer-share-users-field { display: grid; grid-column: 1 / -1; gap: 7px; color: var(--muted); font-size: 11px; }
+.prayer-share-user-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.prayer-share-user-option { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: rgba(19, 25, 35, .7); color: var(--text); cursor: pointer; }
+.prayer-share-user-option input { width: 15px; height: 15px; flex: none; margin: 0; accent-color: var(--green); }
+.prayer-share-user-option input:disabled { cursor: not-allowed; opacity: .7; }
+.prayer-share-users-field > small { color: var(--quiet); font-size: 10px; }
 .prayer-form input:not([type="checkbox"]), .prayer-form select, .prayer-form textarea, .prayer-category-form input, .prayer-answered-dialog textarea { width: 100%; min-width: 0; min-height: 38px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: #131923; color: var(--text); font-size: 12px; }
 .prayer-form textarea, .prayer-answered-dialog textarea { resize: vertical; line-height: 1.55; }
 .prayer-pin-option { display: flex !important; align-items: center; gap: 8px !important; }

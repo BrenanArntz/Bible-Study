@@ -533,7 +533,12 @@
               </label>
               <label id="prayer-new-category-field" hidden>New category name<input id="prayer-new-category" maxlength="60" placeholder="Category name"></label>
               <label>Scripture reference (optional)<input id="prayer-scripture-ref" maxlength="100" placeholder="Philippians 4:6-7"></label>
-              <label>Share with spouse email (optional)<input id="prayer-shared-email" type="email" maxlength="254" placeholder="spouse@example.com"></label>
+              <div id="prayer-share-users-field" class="prayer-share-users-field">
+                <span>Share with registered accounts</span>
+                <div id="prayer-share-users" class="prayer-share-user-options" role="group" aria-label="Choose registered accounts to share this prayer with"></div>
+                <small id="prayer-share-users-help">Check the name of anyone you want to share this prayer with.</small>
+              </div>
+
               <label class="prayer-pin-option"><input id="prayer-pin" type="checkbox"> Pin to top</label>
               <div class="prayer-form-actions">
                 <button class="button button-primary" id="prayer-save-button" type="submit">Save prayer</button>
