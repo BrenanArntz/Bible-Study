@@ -13,6 +13,28 @@ const statusMessage = document.querySelector("#upload-status");
 let previewUrls = [];
 let selectedFiles = [];
 
+function lastUploadedNote() {
+  try {
+    return JSON.parse(sessionStorage.getItem("scripture-study:last-uploaded-note") || "null");
+  } catch {
+    return null;
+  }
+}
+
+function renderLastUploadOption() {
+  const last = lastUploadedNote();
+  const option = document.querySelector("#last-upload-option");
+  if (!last?.path) {
+    option.hidden = true;
+    return;
+  }
+  option.hidden = false;
+  option.textContent = `Append to last uploaded note: ${last.title}`;
+  option.value = "last";
+}
+
+renderLastUploadOption();
+
 function setStatus(message, isError = false) {
   statusMessage.textContent = message;
   statusMessage.classList.toggle("error", isError);
@@ -83,24 +105,48 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
-  const formData = new FormData();
-  files.forEach((file) => formData.append("files", file));
-  if (destination.value === "existing") {
-    formData.append("target_note", existingNote.value);
-  }
+  const targetNote = destination.value === "existing"
+    ? existingNote.value
+    : destination.value === "last"
+      ? lastUploadedNote()?.path
+      : "";
   uploadButton.disabled = true;
   uploadButton.textContent = "Uploading…";
   setStatus(`Transcribing and saving ${files.length} image(s)…`);
 
   try {
-    const result = await apiRequest("/api/uploads", { method: "POST", body: formData });
-    const summary = result.items.map((item) => {
-      const provider = item.transcription_provider === "gemini" ? "Gemini" : "browser OCR";
-      const transcription = item.transcription_available ? provider : `${provider}, no text detected`;
-      const notePaths = item.note_paths?.length ? item.note_paths.join(", ") : item.note_path;
-      return `${item.original_filename} → ${notePaths} (${transcription})`;
+    const completed = [];
+    for (let index = 0; index < files.length; index += 1) {
+      setStatus(`Transcribing page ${index + 1} of ${files.length}…`);
+      const formData = new FormData();
+      formData.append("files", files[index]);
+      if (targetNote) formData.append("target_note", targetNote);
+      const result = await apiRequest("/api/uploads", { method: "POST", body: formData });
+      completed.push(...(result.items || []));
+      if (index === 0 && !targetNote) {
+        const firstPath = completed[0]?.note_path;
+        if (firstPath) sessionStorage.setItem("scripture-study:current-upload", JSON.stringify({
+          path: firstPath,
+          title: completed[0]?.note_title || "",
+        }));
+      }
+    }
+
+    const uniquePaths = [...new Map(completed.flatMap((item) => (
+      item.note_paths?.length ? item.note_paths : [item.note_path]
+    ).filter(Boolean).map((path) => [path, item]))).entries()];
+    statusMessage.replaceChildren();
+    const intro = document.createTextNode(`Uploaded ${files.length} page(s). `);
+    statusMessage.append(intro);
+    uniquePaths.forEach(([path, item], index) => {
+      if (index) statusMessage.append(document.createTextNode(" "));
+      const link = document.createElement("a");
+      link.className = "upload-open-link";
+      link.href = `./index.html#note=${encodeURIComponent(path)}`;
+      link.textContent = `Open ${item.note_title || path.split("/").at(-1).replace(/\.md$/i, "")}`;
+      statusMessage.append(link);
     });
-    setStatus(summary.join(" | "));
+    renderLastUploadOption();
     form.reset();
     selectedFiles = [];
     existingNoteField.hidden = true;
@@ -127,3 +173,9 @@ if (sessionError) {
 window.addEventListener("beforeunload", () => {
   previewUrls.forEach((url) => URL.revokeObjectURL(url));
 });
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  });
+}

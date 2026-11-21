@@ -2,6 +2,8 @@ import { supabase } from "./supabase-client.js";
 
 // --- Shared note, image, and Scripture reference configuration ---
 const NOTE_CATEGORIES = ["exegesis", "topics", "church-history"];
+const NOTE_IDENTIFIER_PATTERN = /(?<![A-Z0-9])((?:CH|[ET])\d{3})(?!\d)/i;
+const NOTE_IDENTIFIER_FULL_PATTERN = /^(?:CH|[ET])\d{3}$/i;
 const FOLDER_NAMES = {
   exegesis: "Exegesis",
   topics: "Topics",
@@ -125,12 +127,12 @@ function noteFields(path, content, modifiedAt = new Date().toISOString()) {
   const category = path.split("/")[0];
   const heading = body.match(/^#\s+(.+?)\s*$/m)?.[1];
   let title = typeof metadata.title === "string" ? metadata.title.trim() : "";
-  if (!title || /^\d{6,}$/.test(title) || /^[ET]\d{3}$/i.test(title)) {
+  if (!title || /^\d{6,}$/.test(title) || /^(?:CH|[ET])\d{3}$/i.test(title)) {
     title = heading || path.split("/").at(-1).replace(/\.md$/i, "");
   }
-  const idFromText = content.slice(0, 2200).match(/(?<![A-Z0-9])([ET]\d{3})(?!\d)/i)?.[1]?.toUpperCase();
+  const idFromText = content.slice(0, 2200).match(NOTE_IDENTIFIER_PATTERN)?.[1]?.toUpperCase();
   const idValue = String(metadata.identifier || metadata.id || "").toUpperCase();
-  const identifier = /^[ET]\d{3}$/.test(idValue) ? idValue : idFromText || null;
+  const identifier = NOTE_IDENTIFIER_FULL_PATTERN.test(idValue) ? idValue : idFromText || null;
   let date = normalizeDate(metadata.date);
   if (!date) {
     for (const line of body.split(/\r?\n/).slice(0, 20)) {
@@ -150,10 +152,13 @@ function noteFields(path, content, modifiedAt = new Date().toISOString()) {
   };
 }
 
-async function allNotes() {
+async function allNotes(includeContent = false) {
+  const columns = includeContent
+    ? "id,user_id,path,content,title,category,note_date,identifier,reference,created_at,updated_at"
+    : "id,user_id,path,title,category,note_date,identifier,reference,updated_at";
   const { data, error } = await supabase
     .from("study_notes")
-    .select("id,user_id,path,content,title,category,note_date,identifier,reference,created_at,updated_at")
+    .select(columns)
     .order("path");
   if (error) return fail(error, "Could not load notes");
   return data || [];
@@ -274,21 +279,30 @@ async function putContent(path, content) {
   if (!data) throw new Error("Note not found or you do not have permission to edit it.");
 }
 
-async function transcribeImage(storagePath) {
+async function transcribeImage(storagePath, imagePayload = null) {
   const { data, error } = await supabase.functions.invoke("transcribe-image", {
-    body: { imagePath: storagePath },
+    body: imagePayload
+      ? { imageBase64: imagePayload.base64, contentType: imagePayload.contentType }
+      : { imagePath: storagePath },
   });
   if (error) {
-    if (error.context?.status === 503) return localOcr(storagePath);
+    if (error.context?.status === 503) return localOcr(storagePath, imagePayload);
     return fail(error, "Image transcription failed");
   }
   if (!Array.isArray(data?.notes)) throw new Error("Transcription returned an invalid response.");
   return data;
 }
 
-async function localOcr(storagePath) {
-  const { data: image, error } = await supabase.storage.from("study-images").download(storagePath);
-  if (error) return fail(error, "Could not load image for browser OCR");
+async function localOcr(storagePath, imagePayload = null) {
+  let image;
+  if (imagePayload) {
+    const bytes = Uint8Array.from(atob(imagePayload.base64), (character) => character.charCodeAt(0));
+    image = new Blob([bytes], { type: imagePayload.contentType || "image/jpeg" });
+  } else {
+    const downloaded = await supabase.storage.from("study-images").download(storagePath);
+    if (downloaded.error) return fail(downloaded.error, "Could not load image for browser OCR");
+    image = downloaded.data;
+  }
   let tesseract;
   try {
     tesseract = await import("https://esm.sh/tesseract.js@6");
@@ -299,14 +313,19 @@ async function localOcr(storagePath) {
   try {
     const { data } = await worker.recognize(image);
     const markdown = String(data.text || "").trim();
-    const identifier = markdown.match(/(?<![A-Z0-9])([ET]\d{3})(?!\d)/i)?.[1]?.toUpperCase() || "";
+    const identifier = markdown.match(NOTE_IDENTIFIER_PATTERN)?.[1]?.toUpperCase() || "";
     const firstLine = markdown.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
     const title = firstLine.split(/\s+/).length <= 8 ? firstLine : "";
+    const category = identifier.startsWith("CH")
+      ? "church-history"
+      : identifier.startsWith("E")
+        ? "exegesis"
+        : "topics";
     return {
       provider: "browser",
       notes: [{
         transcription: markdown,
-        category: identifier.startsWith("E") ? "exegesis" : "topics",
+        category,
         identifier,
         title,
         date: normalizeDate(firstLine) || "",
@@ -348,12 +367,13 @@ async function prepareTranscriptionImage(file) {
 
 async function transcribeUploadedImage(file) {
   const transcriptionFile = await prepareTranscriptionImage(file);
-  const { storagePath } = await uploadImage(transcriptionFile);
-  try {
-    return await transcribeImage(storagePath);
-  } finally {
-    await storageDelete([storagePath]);
-  }
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^;]+;base64,/i, ""));
+    reader.onerror = () => reject(new Error("Could not prepare the image for transcription."));
+    reader.readAsDataURL(transcriptionFile);
+  });
+  return await transcribeImage(null, { base64, contentType: "image/jpeg" });
 }
 
 function makeTitle(identifier, title, reference, fallback) {
@@ -424,24 +444,26 @@ async function createFromUpload(file, targetPath, continuationPath) {
     for (const segment of segments) {
       const markdown = typeof segment.transcription === "string" ? segment.transcription.trim() : "";
       const suppliedIdentifier = String(segment.identifier || "");
-      const textIdentifier = markdown.match(/(?<![A-Z0-9])([ET]\d{3})(?!\d)/i)?.[1] || "";
-      const identifier = /^[ET]\d{3}$/i.test(suppliedIdentifier)
+      const textIdentifier = markdown.match(NOTE_IDENTIFIER_PATTERN)?.[1] || "";
+      const identifier = NOTE_IDENTIFIER_FULL_PATTERN.test(suppliedIdentifier)
         ? suppliedIdentifier.toUpperCase()
         : textIdentifier.toUpperCase();
-      const category = identifier.startsWith("E")
-        ? "exegesis"
-        : identifier.startsWith("T")
-          ? "topics"
-          : NOTE_CATEGORIES.includes(segment.category)
-            ? segment.category
-            : "topics";
+      const category = identifier.startsWith("CH")
+        ? "church-history"
+        : identifier.startsWith("E")
+          ? "exegesis"
+          : identifier.startsWith("T")
+            ? "topics"
+            : NOTE_CATEGORIES.includes(segment.category)
+              ? segment.category
+              : "topics";
       const title = makeTitle(identifier, segment.title, segment.reference, file.name.replace(/\.[^.]+$/, ""));
       let path = targetPath;
       if (!path && identifier) {
         path = existing.find((note) => note.category === category && note.identifier === identifier)?.path
           || [...grouped.values()].find((note) => note.category === category && note.identifier === identifier)?.path;
       }
-      if (!path && continuationPath && category === "exegesis" && segments.length === 1) {
+      if (!path && !identifier && continuationPath && segments.length === 1) {
         path = continuationPath;
       }
       if (!path) {
@@ -468,7 +490,9 @@ async function createFromUpload(file, targetPath, continuationPath) {
     const changedPaths = [];
     for (const item of grouped.values()) {
       const markdown = item.markdown.join("\n\n");
-      const current = notesByPath.get(item.path);
+      const current = notesByPath.get(item.path)
+        ? await noteByPath(item.path)
+        : null;
       writeStarted = true;
       if (current) {
         await appendUpload(item.path, current.content, filename, markdown);
@@ -482,6 +506,7 @@ async function createFromUpload(file, targetPath, continuationPath) {
       original_filename: file.name,
       note_paths: changedPaths,
       note_path: changedPaths[0],
+      note_title: changedPaths.length ? (grouped.get(changedPaths[0])?.title || "") : "",
       transcription_available: segments.some((segment) => String(segment.transcription || "").trim()),
       transcription_provider: transcription.provider || "browser",
     };
@@ -504,7 +529,15 @@ async function uploadBatch(formData) {
     const result = await createFromUpload(file, targetPath, continuationPath);
     items.push(result);
     if (!targetPath) {
-      continuationPath = result.note_paths.find((path) => path.startsWith("exegesis/")) || continuationPath;
+      const latestPath = result.note_paths.at(-1) || result.note_path;
+      if (latestPath) {
+        continuationPath = latestPath;
+        const latestTitle = result.note_title || latestPath.split("/").at(-1).replace(/\.md$/i, "");
+        sessionStorage.setItem("scripture-study:last-uploaded-note", JSON.stringify({
+          path: latestPath,
+          title: latestTitle,
+        }));
+      }
     }
   }
   return { items };
@@ -524,7 +557,7 @@ async function listFolders() {
 }
 
 function searchNotes(params) {
-  return allNotes().then((notes) => {
+  return allNotes(true).then((notes) => {
     const query = (params.get("q") || "").toLocaleLowerCase().split(/\s+/).filter(Boolean);
     const category = params.get("category") || "all";
     const idType = params.get("id_type") || "all";
@@ -538,6 +571,7 @@ function searchNotes(params) {
       if (category !== "all" && note.category !== category) return false;
       if (idType === "E" && !note.identifier?.startsWith("E")) return false;
       if (idType === "T" && !note.identifier?.startsWith("T")) return false;
+      if (idType === "CH" && !note.identifier?.startsWith("CH")) return false;
       if (idType === "none" && note.identifier) return false;
       if (start && (!note.note_date || note.note_date < start)) return false;
       if (end && (!note.note_date || note.note_date > end)) return false;
@@ -578,6 +612,67 @@ function searchNotes(params) {
 // --- Reading plan validation, chapter parsing, and calendar helpers ---
 const TASK_TYPES = ["personal-reading", "reading-with-haley", "verse-quiz", "greek", "church-history", "other"];
 const UUID_PATTERN = /^[0-9a-f-]{36}$/i;
+let activeReaderProfileId = null;
+
+export function setActiveReaderProfile(profileId) {
+  activeReaderProfileId = typeof profileId === "string" && UUID_PATTERN.test(profileId) ? profileId : null;
+}
+
+async function readerProfiles() {
+  const { data, error } = await supabase
+    .from("reader_profiles")
+    .select("id,name,owner_user_id,shared_emails,created_at")
+    .order("name");
+  if (error) return fail(error, "Could not load managed reader profiles");
+  return data || [];
+}
+
+async function createReaderProfile(payload) {
+  const user = await currentUser();
+  const name = String(payload.name || "").trim();
+  const sharedEmails = [...new Set((Array.isArray(payload.shared_emails) ? payload.shared_emails : [])
+    .map((email) => String(email).trim().toLowerCase())
+    .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))];
+  if (!name || name.length > 80) throw new Error("Enter a reader name between 1 and 80 characters.");
+  const { data, error } = await supabase
+    .from("reader_profiles")
+    .insert({ name, owner_user_id: user.id, shared_emails: sharedEmails })
+    .select("id,name,owner_user_id,shared_emails,created_at")
+    .single();
+  if (error) return fail(error, "Could not create managed reader profile");
+  return data;
+}
+
+async function updateReaderProfile(id, payload) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid managed reader profile.");
+  const values = {};
+  if (payload.name !== undefined) {
+    const name = String(payload.name).trim();
+    if (!name || name.length > 80) throw new Error("Enter a reader name between 1 and 80 characters.");
+    values.name = name;
+  }
+  if (payload.shared_emails !== undefined) {
+    values.shared_emails = [...new Set((Array.isArray(payload.shared_emails) ? payload.shared_emails : [])
+      .map((email) => String(email).trim().toLowerCase())
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))];
+  }
+  const { data, error } = await supabase
+    .from("reader_profiles")
+    .update(values)
+    .eq("id", id)
+    .select("id,name,owner_user_id,shared_emails,created_at")
+    .maybeSingle();
+  if (error) return fail(error, "Could not update managed reader profile");
+  if (!data) throw new Error("Managed reader profile not found or you do not have permission to edit it.");
+  return data;
+}
+
+async function deleteReaderProfile(id) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid managed reader profile.");
+  const { error } = await supabase.from("reader_profiles").delete().eq("id", id);
+  if (error) return fail(error, "Could not remove managed reader profile");
+  return { status: "deleted", id };
+}
 const READING_TIME_ZONE = "America/New_York";
 
 export function dateKeyInNewYork(date = new Date()) {
@@ -833,6 +928,7 @@ function generatePlanItems(plan, startDate, sortStart = 0) {
   return Array.from({ length: totalReadings }, (_, index) => ({
     plan_id: plan.id,
     user_id: plan.user_id,
+    profile_id: activeReaderProfileId,
     sort_order: sortStart + index,
     scheduled_date: scheduledDateForIndex({ ...plan, start_date: startDate }, index),
     chapter_selections: planItemSelections(plan, index),
@@ -842,7 +938,11 @@ function generatePlanItems(plan, startDate, sortStart = 0) {
 
 async function fetchReadingPlans() {
   const columns = "id,title,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,status,collaborator_email,owner_email,user_id,created_at";
-  const { data, error } = await supabase.from("study_reading_plans").select(columns).order("created_at");
+  let query = supabase.from("study_reading_plans").select(columns).order("created_at");
+  query = activeReaderProfileId
+    ? query.eq("profile_id", activeReaderProfileId)
+    : query.is("profile_id", null);
+  const { data, error } = await query;
   if (error) return fail(error, "Could not load book reading plans");
   return data || [];
 }
@@ -851,10 +951,14 @@ async function allPlanItems() {
   const rows = [];
   const pageSize = 1000;
   for (let offset = 0; ; offset += pageSize) {
-    const { data, error } = await supabase.from("study_reading_plan_items")
+    let query = supabase.from("study_reading_plan_items")
       .select("id,plan_id,user_id,sort_order,scheduled_date,chapter_selections,status,completed_date,notes")
       .order("plan_id").order("sort_order").order("id")
       .range(offset, offset + pageSize - 1);
+    query = activeReaderProfileId
+      ? query.eq("profile_id", activeReaderProfileId)
+      : query.is("profile_id", null);
+    const { data, error } = await query;
     if (error) return fail(error, "Could not load reading plan items");
     rows.push(...(data || []));
     if ((data || []).length < pageSize) break;
@@ -899,6 +1003,7 @@ async function ensureLegacyPlanItems(plans, currentItems) {
         const item = matchingItems.get(completion.scheduled_date);
         return {
           user_id: user.id,
+          profile_id: activeReaderProfileId,
           read_date: completion.scheduled_date,
           chapter_selections: item.chapter_selections,
           source_type: "plan",
@@ -1018,9 +1123,13 @@ async function bookReadingPlans(date = dateKeyInNewYork()) {
 async function readingDayStatus(date = dateKeyInNewYork()) {
   if (!validDateKey(date)) throw new Error("Use a valid reading date.");
   await backfillLegacyChapterReadings();
-  const { count, error } = await supabase.from("reading_logs")
+  let logQuery = supabase.from("reading_logs")
     .select("id", { count: "exact", head: true })
     .eq("read_date", date);
+  logQuery = activeReaderProfileId
+    ? logQuery.eq("profile_id", activeReaderProfileId)
+    : logQuery.is("profile_id", null);
+  const { count, error } = await logQuery;
   if (error) return fail(error, "Could not check reading logs");
   return { date, has_read: (count || 0) > 0 };
 }
@@ -1034,9 +1143,12 @@ async function fetchReadingLogs(date) {
   const pageSize = 1000;
   for (let offset = 0; ; offset += pageSize) {
     let query = supabase.from("reading_logs")
-      .select("id,user_id,read_date,chapter_selections,source_type,plan_id,plan_item_id,created_at,legacy_source_id")
+      .select("id,user_id,profile_id,read_date,chapter_selections,source_type,plan_id,plan_item_id,created_at,legacy_source_id")
       .order("read_date", { ascending: false }).order("created_at").order("id")
       .range(offset, offset + pageSize - 1);
+    query = activeReaderProfileId
+      ? query.eq("profile_id", activeReaderProfileId)
+      : query.is("profile_id", null);
     if (date) query = query.eq("read_date", date);
     const { data, error } = await query;
     if (error) return fail(error, "Could not load reading logs");
@@ -1056,7 +1168,9 @@ async function backfillLegacyChapterReadings() {
 
 async function readingStatistics() {
   const [{ count: noteCount, error: noteError }, logs] = await Promise.all([
-    supabase.from("study_notes").select("id", { count: "exact", head: true }).in("category", NOTE_CATEGORIES),
+    activeReaderProfileId
+      ? Promise.resolve({ count: 0, error: null })
+      : supabase.from("study_notes").select("id", { count: "exact", head: true }).in("category", NOTE_CATEGORIES),
     fetchReadingLogs(),
   ]);
   if (noteError) return fail(noteError, "Could not count study notes");
@@ -1141,6 +1255,7 @@ async function saveBookReadingPlan(payload, id = "") {
     ...metadata,
     user_id: user.id,
     owner_email: user.email || null,
+    profile_id: activeReaderProfileId,
   };
   let planId = id;
   let planOwnerId = user.id;
@@ -1273,6 +1388,7 @@ async function saveChapterReading(payload) {
       read_date: readDate,
       chapter_selections: selections,
       source_type: "manual",
+      profile_id: activeReaderProfileId,
     })
     .select("id")
     .single();
@@ -1291,7 +1407,7 @@ async function saveReadingLog(payload, id = "") {
   const readDate = String(payload.read_date || "");
   if (!validDateKey(readDate)) throw new Error("Choose a valid date for this reading log.");
   const user = await currentUser();
-  const values = { read_date: readDate, chapter_selections: selections };
+  const values = { read_date: readDate, chapter_selections: selections, profile_id: activeReaderProfileId };
   const query = id
     ? supabase.from("reading_logs").update(values).eq("id", id).eq("user_id", user.id).eq("source_type", "manual").select("id").maybeSingle()
     : supabase.from("reading_logs").insert({ ...values, user_id: user.id, source_type: "manual" }).select("id").single();
@@ -1453,12 +1569,13 @@ async function setReadingPlanStatus(id, status) {
 async function taskPlan(date = dateKeyInNewYork()) {
   if (!validDateKey(date)) throw new Error("Use a valid task date.");
   const user = await currentUser();
-  const [{ data: tasks, error: taskError }, { data: completed, error: completionError }] = await Promise.all([
-    supabase.from("study_tasks")
-      .select("id,task_type,title,details,weekdays,cadence_type,interval_days,start_date,status")
-      .order("created_at"),
-    supabase.from("study_task_completions").select("task_id").eq("completion_date", date),
-  ]);
+  let taskQuery = supabase.from("study_tasks")
+    .select("id,task_type,title,details,weekdays,cadence_type,interval_days,start_date,status")
+    .order("created_at");
+  let completionQuery = supabase.from("study_task_completions").select("task_id").eq("completion_date", date);
+  taskQuery = activeReaderProfileId ? taskQuery.eq("profile_id", activeReaderProfileId) : taskQuery.is("profile_id", null);
+  completionQuery = activeReaderProfileId ? completionQuery.eq("profile_id", activeReaderProfileId) : completionQuery.is("profile_id", null);
+  const [{ data: tasks, error: taskError }, { data: completed, error: completionError }] = await Promise.all([taskQuery, completionQuery]);
   if (taskError) return fail(taskError, "Could not load recurring tasks");
   if (completionError) return fail(completionError, "Could not load task completions");
   const done = new Set((completed || []).map((item) => item.task_id));
@@ -1496,6 +1613,7 @@ async function saveTask(payload, id = "") {
   }
   const values = {
     user_id: user.id,
+    profile_id: activeReaderProfileId,
     task_type: payload.task_type,
     title,
     details: String(payload.details || "").trim().slice(0, 300),
@@ -1534,6 +1652,7 @@ async function toggleTask(taskId, date) {
       task_id: taskId,
       task_title: taskTitle,
       user_id: user.id,
+      profile_id: activeReaderProfileId,
       completion_date: date,
     });
   const { error } = await query;
@@ -1669,6 +1788,11 @@ export async function apiRequest(url, options = {}) {
   const parsed = new URL(url, window.location.origin);
   const method = (options.method || "GET").toUpperCase();
   const path = parsed.pathname;
+  if (path === "/api/reader-profiles" && method === "GET") return readerProfiles();
+  if (path === "/api/reader-profiles" && method === "POST") return createReaderProfile(JSON.parse(options.body));
+  const readerProfile = path.match(/^\/api\/reader-profiles\/([0-9a-f-]+)$/i);
+  if (readerProfile && method === "PUT") return updateReaderProfile(readerProfile[1], JSON.parse(options.body));
+  if (readerProfile && method === "DELETE") return deleteReaderProfile(readerProfile[1]);
   if (path === "/api/folders" && method === "GET") return listFolders();
   if (path === "/api/search/notes" && method === "GET") return searchNotes(parsed.searchParams);
   if (path === "/api/book-reading-plans" && method === "GET") return bookReadingPlans(parsed.searchParams.get("date") || undefined);

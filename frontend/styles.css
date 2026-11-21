@@ -178,6 +178,16 @@ code { color: var(--accent); font-size: .95em; }
 .account-form .button { justify-self: start; }
 .account-session-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
 .account-session-actions h2 { margin: 0; font-size: 15px; }
+.managed-readers-card { margin-top: 18px; }
+.managed-reader-form { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 10px; }
+.managed-reader-form label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
+.managed-reader-form input { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #131923; color: var(--text); }
+.managed-reader-form small { color: var(--quiet); font-size: 9px; }
+.managed-reader-list { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.managed-reader-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.managed-reader-item div { display: grid; gap: 3px; }
+.managed-reader-item small { color: var(--muted); overflow-wrap: anywhere; }
+.managed-reader-actions { display: flex; gap: 7px; }
 .panel-icon { color: var(--accent); font-size: 20px; }
 .today-plan-card { max-width: 860px; padding: 24px; }
 .today-reading-status { display: flex; align-items: center; gap: 8px; margin-left: 8px; color: var(--muted); font-size: 11px; white-space: nowrap; }
@@ -187,6 +197,9 @@ code { color: var(--accent); font-size: .95em; }
 .today-reading-status[data-read="true"] .today-reading-status-icon { border-color: rgba(129, 182, 155, .55); background: rgba(129, 182, 155, .1); color: var(--green); }
 .today-reading-status[data-error="true"] { max-width: 260px; color: var(--danger); white-space: normal; }
 .today-reading-status[data-error="true"] .today-reading-status-icon { border-color: rgba(229, 154, 143, .55); color: var(--danger); }
+.reader-profile-control, .schedule-date-control { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.reader-profile-control select, .schedule-date-control input { min-height: 36px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: #131923; color: var(--text); font-size: 11px; }
+.stats-reader-control { margin-left: auto; }
 .stats-status { margin-bottom: 18px; }
 /* --- Reading statistics and completed-plan archive --- */
 .stats-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
@@ -218,7 +231,7 @@ code { color: var(--accent); font-size: .95em; }
 .stats-chapter { display: flex; justify-content: space-between; gap: 3px; padding: 5px 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--quiet); font-size: 10px; }
 .stats-chapter.read { border-color: rgba(129, 182, 155, .38); color: var(--green); background: rgba(129, 182, 155, .08); }
 .stats-chapter small { color: var(--muted); font-size: 9px; }
-.completed-reading-plans { margin: 0 0 28px; }
+.completed-reading-plans { max-width: 860px; margin: 0 0 28px; padding: 24px; }
 .completed-reading-plans > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; }
 .completed-reading-plans > summary::-webkit-details-marker { display: none; }
 .completed-reading-plans > summary::after { content: "+"; color: var(--accent); font-size: 17px; }
@@ -383,6 +396,7 @@ code { color: var(--accent); font-size: .95em; }
 .upload-preview { display: block; width: 100%; height: 96px; object-fit: cover; border: 1px solid var(--border); border-radius: 10px; background: #0c1118; }
 .upload-status { min-height: 22px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .upload-status.error { color: var(--danger); }
+.upload-open-link { display: inline-block; color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .upload-submit { width: 100%; min-height: 46px; font-size: 14px; }
 .upload-back { display: inline-flex; margin-bottom: 20px; color: var(--muted); font-size: 12px; text-decoration: none; }
 .upload-back:hover { color: var(--text); }

@@ -6,6 +6,11 @@
     <meta name="theme-color" content="#111827">
     <title>Scripture Study</title>
     <link rel="stylesheet" href="./styles.css">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Scripture Study">
     <!-- Startup error reporting and external Supabase client -->
     <script>
       window.addEventListener("error", (event) => {
@@ -25,7 +30,6 @@
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>if (!window.supabase) document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');</script>
-    <script defer src="./auth-bootstrap.js"></script>
     <script type="module" src="./app.js"></script>
   </head>
   <body>
@@ -90,31 +94,6 @@
           </div>
           <div class="folder-grid" id="folder-grid" aria-live="polite"></div>
         </section>
-
-        <!-- Completed reading plan archive -->
-        <details class="panel-card completed-reading-plans">
-          <summary>
-            <span>Reading plan archive</span>
-            <span class="completed-plans-count" id="completed-plans-count">Loading…</span>
-          </summary>
-          <p class="empty-state" id="completed-plans-empty" hidden></p>
-          <ul class="book-plan-list" id="completed-plans-list" aria-live="polite"></ul>
-          <!-- Continue Canceled Reading Plan Modal -->
-          <dialog id="continue-plan-dialog" class="continue-plan-dialog">
-            <form id="continue-plan-form" method="dialog" class="continue-plan-form">
-              <h3 id="continue-plan-title">Continue reading plan</h3>
-              <p class="muted" id="continue-plan-scope"></p>
-              <label for="continue-plan-date">Start reading again on
-                <input type="date" id="continue-plan-date" required>
-                <small class="muted">Your next unread reading will be scheduled starting on this date.</small>
-              </label>
-              <div class="continue-plan-actions">
-                <button type="submit" class="button button-primary" id="continue-plan-submit">Continue plan</button>
-                <button type="button" class="button button-quiet" id="continue-plan-close">Cancel</button>
-              </div>
-            </form>
-          </dialog>
-        </details>
 
         <!-- Search and filter across notes -->
         <section class="global-search" aria-labelledby="search-title">
@@ -320,6 +299,11 @@
               <p class="subheading" id="today-date"></p>
             </div>
             <div class="today-actions">
+              <label class="reader-profile-control">Reader
+                <select id="today-reader-profile" aria-label="Choose reader">
+                  <option value="">My Reading</option>
+                </select>
+              </label>
               <label class="schedule-date-control">Schedule date<input id="schedule-date" type="date" aria-label="Choose the schedule date for tasks and readings"></label>
               <button class="button button-quiet" id="today-task-settings-button" type="button" aria-expanded="false" aria-controls="today-task-settings">Task settings</button>
               <button class="button button-quiet" id="book-plan-settings-button" type="button" aria-expanded="false" aria-controls="book-plan-settings">Book plan settings</button>
@@ -489,6 +473,30 @@
             <p class="muted overdue-readings-hint">Missed daily-plan readings, oldest first. Check one off as you catch up.</p>
             <ul class="reading-list today-reading-list" id="book-plan-overdue-list" aria-live="polite"></ul>
           </section>
+
+          <!-- Completed reading plan archive -->
+          <details class="panel-card completed-reading-plans">
+            <summary>
+              <span>Reading plan archive</span>
+              <span class="completed-plans-count" id="completed-plans-count">Loading…</span>
+            </summary>
+            <p class="empty-state" id="completed-plans-empty" hidden></p>
+            <ul class="book-plan-list" id="completed-plans-list" aria-live="polite"></ul>
+            <dialog id="continue-plan-dialog" class="continue-plan-dialog">
+              <form id="continue-plan-form" method="dialog" class="continue-plan-form">
+                <h3 id="continue-plan-title">Continue reading plan</h3>
+                <p class="muted" id="continue-plan-scope"></p>
+                <label for="continue-plan-date">Start reading again on
+                  <input type="date" id="continue-plan-date" required>
+                  <small class="muted">Your next unread reading will be scheduled starting on this date.</small>
+                </label>
+                <div class="continue-plan-actions">
+                  <button type="submit" class="button button-primary" id="continue-plan-submit">Continue plan</button>
+                  <button type="button" class="button button-quiet" id="continue-plan-close">Cancel</button>
+                </div>
+              </form>
+            </dialog>
+          </details>
         </section>
 
         <!-- Reading totals, scripture coverage, and per-chapter history -->
@@ -499,6 +507,11 @@
               <h1 id="stats-title">Reading Stats</h1>
               <p class="subheading">Every plan check-off and manual reading log counts here. Re-reading a chapter counts again.</p>
             </div>
+            <label class="reader-profile-control stats-reader-control">Reader
+              <select id="stats-reader-profile" aria-label="Choose reader for stats">
+                <option value="">My Reading</option>
+              </select>
+            </label>
             <button class="button button-quiet" id="stats-refresh-button" type="button">Refresh stats</button>
           </div>
           <p class="empty-state stats-status" id="stats-status" role="status" aria-live="polite" hidden></p>
@@ -542,6 +555,23 @@
               <h2>Session</h2>
               <button class="button button-danger" id="signout-button" type="button">Sign out</button>
             </div>
+          </section>
+          <section class="panel-card account-card managed-readers-card" aria-labelledby="managed-readers-title">
+            <div class="panel-heading">
+              <div><p class="eyebrow">FAMILY READING</p><h2 id="managed-readers-title">Managed Reader Profiles</h2></div>
+            </div>
+            <form id="managed-reader-form" class="managed-reader-form">
+              <label>Reader name
+                <input id="managed-reader-name" type="text" maxlength="80" required placeholder="Daughter">
+              </label>
+              <label>Shared guardian emails
+                <input id="managed-reader-emails" type="text" placeholder="Spouse@example.com">
+                <small>Separate multiple emails with commas.</small>
+              </label>
+              <button class="button button-primary" id="managed-reader-save" type="submit">Add profile</button>
+            </form>
+            <p class="auth-message" id="managed-reader-message" role="status" aria-live="polite"></p>
+            <ul class="managed-reader-list" id="managed-reader-list"></ul>
           </section>
         </section>
       </div>

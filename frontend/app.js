@@ -7,6 +7,7 @@ import {
   scheduledDateForIndex,
   formatCadence,
   normalizeChapterSelections,
+  setActiveReaderProfile,
 } from "./data.js";
 import { supabase } from "./supabase-client.js";
 
@@ -33,6 +34,9 @@ const state = {
   selectedBookPlanBooks: [],
   // pending plan to continue from archive
   pendingContinuePlan: null,
+  noteDirty: false,
+  activeProfileId: null,
+  readerProfiles: [],
 };
 
 const elements = {
@@ -119,6 +123,14 @@ const elements = {
   accountMessage: document.querySelector("#account-message"),
   accountSaveButton: document.querySelector("#account-save-button"),
   signoutButton: document.querySelector("#signout-button"),
+  todayReaderProfile: document.querySelector("#today-reader-profile"),
+  statsReaderProfile: document.querySelector("#stats-reader-profile"),
+  managedReaderForm: document.querySelector("#managed-reader-form"),
+  managedReaderName: document.querySelector("#managed-reader-name"),
+  managedReaderEmails: document.querySelector("#managed-reader-emails"),
+  managedReaderSave: document.querySelector("#managed-reader-save"),
+  managedReaderMessage: document.querySelector("#managed-reader-message"),
+  managedReaderList: document.querySelector("#managed-reader-list"),
   taskSettingsButton: document.querySelector("#today-task-settings-button"),
   taskSettings: document.querySelector("#today-task-settings"),
   taskForm: document.querySelector("#today-task-form"),
@@ -460,6 +472,9 @@ async function refreshLibrary() {
 }
 
 async function openNote(path) {
+  if (state.noteDirty && state.activeNotePath && state.activeNotePath !== path) {
+    if (!window.confirm("Discard unsaved changes and open another note?")) return;
+  }
   try {
     const note = await requestJson(`/api/note/${encodePath(path)}`);
     state.activeNotePath = note.path;
@@ -500,6 +515,7 @@ async function openNote(path) {
     elements.sourcePanel.hidden = true;
     elements.sourceToggle.textContent = "Show note source";
     elements.noteSource.value = note.content;
+    state.noteDirty = false;
     const folderKey = note.path.split("/")[0];
     const folder = state.folders.find((item) => item.key === folderKey);
     if (folder) {
@@ -594,9 +610,9 @@ function findAutomaticReferences(text, noteBook = activeNoteBibleBook()) {
   const identifiers = new Map();
   for (const note of state.folders.flatMap((folder) => folder.files || [])) {
     const identifier = String(
-      note.identifier || note.name.match(/(?<![A-Z0-9])[A-Z]\d{3}(?![A-Z0-9])/i)?.[0] || "",
+      note.identifier || note.name.match(/(?<![A-Z0-9])((?:CH|[ET])\d{3})(?!\d)/i)?.[1] || "",
     ).toUpperCase();
-    if (!/^[A-Z]\d{3}$/.test(identifier)) continue;
+    if (!/^(?:CH|[ET])\d{3}$/i.test(identifier)) continue;
     identifiers.set(identifier, identifiers.has(identifier) ? null : note);
   }
   for (const [identifier, note] of identifiers) {
@@ -1563,6 +1579,7 @@ async function saveNote() {
     state.noteTitle = title;
     elements.noteTitle.value = title;
     elements.noteSource.value = state.noteRawContent;
+    state.noteDirty = false;
     renderEditableNote(getEditableMarkdown(state.noteRawContent));
     showToast("Note saved to your vault.");
     await loadVault();
@@ -2055,7 +2072,7 @@ function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlan
   elements.bookPlanTodayEmpty.textContent = plans.length
     ? `No readings scheduled for ${formatDate(date)}.`
     : completedPlans.length
-      ? "All book reading plans are complete. View them in the Library archive."
+      ? "All book reading plans are complete. View them in the archive below on the Today tab."
       : "No book reading plans yet. Use Book plan settings to create one.";
 
   const next = plans.filter((plan) => plan.status === "active")
@@ -2087,7 +2104,7 @@ function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlan
 function renderBookPlanSettings(plans) {
   elements.bookPlanList.replaceChildren();
   elements.bookPlansEmpty.hidden = plans.length > 0;
-  elements.bookPlansEmpty.textContent = "No active or paused book reading plans. Create one here, or view archived plans in the Library.";
+  elements.bookPlansEmpty.textContent = "No active or paused book reading plans. Create one here, or view archived plans in the archive below on the Today tab.";
   plans.forEach((plan) => {
     const row = document.createElement("li");
     row.className = "book-plan-item";
@@ -2221,6 +2238,7 @@ function renderPlanQueue(plan) {
       remove.type = "button";
       remove.className = "button button-danger";
       remove.textContent = "Remove";
+      remove.disabled = profile.owner_user_id !== state.userId;
       remove.addEventListener("click", () => removePlanItem(item));
       row.append(skip, up, down, remove);
     } else if (item.status === "skipped") {
@@ -2776,7 +2794,9 @@ function renderReadingStatistics(stats) {
   elements.statsSummary.replaceChildren();
   elements.statsTestamentProgress.replaceChildren();
   elements.statsBookList.replaceChildren();
-  appendStatCard("NOTES TAKEN", stats.note_count.toLocaleString(), "Notes in your study library");
+  if (!state.activeProfileId) {
+    appendStatCard("NOTES TAKEN", stats.note_count.toLocaleString(), "Notes in your study library");
+  }
   appendStatCard("CHAPTERS READ", stats.chapter_reads.toLocaleString(), "Includes rereading the same chapter");
   appendStatCard("BIBLE READ-THROUGHS", stats.bible_read_throughs.toLocaleString(), "How many times you've read the entire Bible");
   appendStatCard(
@@ -2870,7 +2890,12 @@ async function loadReadingStatistics() {
 
 // --- View switching and Bible passage lookup ---
 function setActiveView(view) {
-  state.activeView = ["today", "stats", "account"].includes(view) ? view : "library";
+  const nextView = ["today", "stats", "account"].includes(view) ? view : "library";
+  if (state.noteDirty && state.activeView !== nextView) {
+    if (!window.confirm("Discard unsaved note changes and switch views?")) return false;
+    state.noteDirty = false;
+  }
+  state.activeView = nextView;
   const showingToday = state.activeView === "today";
   elements.libraryView.hidden = state.activeView !== "library";
   elements.todayView.hidden = !showingToday;
@@ -2885,6 +2910,7 @@ function setActiveView(view) {
       link.removeAttribute("aria-current");
     }
   });
+  return true;
 }
 
 async function lookupEsv(event) {
@@ -3179,6 +3205,25 @@ if (!window.location.hash) {
 }
 setActiveView(initialView);
 
+elements.noteTitle.addEventListener("input", () => {
+  state.noteDirty = true;
+});
+elements.editor.addEventListener("input", () => {
+  state.noteDirty = true;
+});
+document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    event.preventEvent?.();
+    event.preventDefault();
+    if (state.activeNotePath) saveNote();
+  }
+});
+window.addEventListener("beforeunload", (event) => {
+  if (!state.noteDirty) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
 async function showSession(session) {
   const authenticated = Boolean(session?.user);
   elements.authPanel.hidden = authenticated;
@@ -3199,10 +3244,133 @@ async function showSession(session) {
   elements.accountMessage.textContent = "Loading your account name…";
   elements.signedInEmail.textContent = state.userEmail || "Signed in";
   if (state.userEmail) elements.signedInEmail.title = state.userEmail;
-  const requests = [loadVault(), loadReadingPlan(), loadAccountProfile(session.user)];
+  const requests = [loadVault(), loadReadingPlan(), loadAccountProfile(session.user), loadManagedReaderProfiles()];
   if (state.activeView === "stats") requests.push(loadReadingStatistics());
   await Promise.all(requests);
 }
+
+async function loadManagedReaderProfiles() {
+  try {
+    state.readerProfiles = await requestJson("/api/reader-profiles");
+    renderManagedReaderProfiles();
+    renderReaderProfileSelectors();
+  } catch (error) {
+    elements.managedReaderMessage.textContent = error.message;
+  }
+}
+
+function renderReaderProfileSelectors() {
+  for (const select of [elements.todayReaderProfile, elements.statsReaderProfile]) {
+    if (!select) continue;
+    select.replaceChildren(new Option("My Reading", ""));
+    state.readerProfiles.forEach((profile) => select.append(new Option(profile.name, profile.id)));
+    select.value = state.activeProfileId || "";
+  }
+}
+
+function renderManagedReaderProfiles() {
+  elements.managedReaderList.replaceChildren();
+  if (!state.readerProfiles.length) {
+    const empty = document.createElement("li");
+    empty.className = "empty-state";
+    empty.textContent = "No managed reader profiles yet.";
+    elements.managedReaderList.append(empty);
+    return;
+  }
+  state.readerProfiles.forEach((profile) => {
+    const row = document.createElement("li");
+    row.className = "managed-reader-item";
+    const details = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = profile.name;
+    const emails = document.createElement("small");
+    emails.textContent = profile.shared_emails?.length ? profile.shared_emails.join(", ") : "Not shared";
+    details.append(name, emails);
+    const actions = document.createElement("div");
+    actions.className = "managed-reader-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "button button-quiet";
+    edit.textContent = "Edit";
+    edit.addEventListener("click", () => editManagedReaderProfile(profile));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "button button-danger";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", async () => {
+      if (!window.confirm(`Remove the ${profile.name} reader profile and its plans/tasks/stats?`)) return;
+      try {
+        await requestJson(`/api/reader-profiles/${profile.id}`, { method: "DELETE" });
+        if (state.activeProfileId === profile.id) setActiveReaderProfileId(null);
+        await loadManagedReaderProfiles();
+        await loadReadingPlan();
+        await loadReadingStatisticsIfVisible();
+        showToast("Managed reader profile removed.");
+      } catch (error) {
+        elements.managedReaderMessage.textContent = error.message;
+      }
+    });
+    actions.append(edit, remove);
+    row.append(details, actions);
+    elements.managedReaderList.append(row);
+  });
+}
+
+function editManagedReaderProfile(profile) {
+  elements.managedReaderName.value = profile.name;
+  elements.managedReaderEmails.value = (profile.shared_emails || []).join(", ");
+  elements.managedReaderSave.textContent = "Save profile";
+  elements.managedReaderForm.dataset.profileId = profile.id;
+  elements.managedReaderName.focus();
+}
+
+async function setActiveReaderProfileId(profileId) {
+  state.activeProfileId = profileId || null;
+  setActiveReaderProfile(state.activeProfileId);
+  renderReaderProfileSelectors();
+  if (state.activeView === "today") await loadReadingPlan();
+  if (state.activeView === "stats") await loadReadingStatistics();
+}
+
+elements.managedReaderForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = elements.managedReaderName.value.trim();
+  const sharedEmails = elements.managedReaderEmails.value.split(",").map((email) => email.trim()).filter(Boolean);
+  if (!name) {
+    elements.managedReaderMessage.textContent = "Enter a reader name.";
+    return;
+  }
+  const id = elements.managedReaderForm.dataset.profileId;
+  elements.managedReaderSave.disabled = true;
+  try {
+    if (id) {
+      await requestJson(`/api/reader-profiles/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, shared_emails: sharedEmails }),
+      });
+      elements.managedReaderMessage.textContent = "Reader profile updated.";
+    } else {
+      await requestJson("/api/reader-profiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, shared_emails: sharedEmails }),
+      });
+      elements.managedReaderMessage.textContent = "Reader profile added.";
+    }
+    elements.managedReaderForm.reset();
+    delete elements.managedReaderForm.dataset.profileId;
+    elements.managedReaderSave.textContent = "Add profile";
+    await loadManagedReaderProfiles();
+  } catch (error) {
+    elements.managedReaderMessage.textContent = error.message;
+  } finally {
+    elements.managedReaderSave.disabled = false;
+  }
+});
+
+elements.todayReaderProfile.addEventListener("change", () => setActiveReaderProfileId(elements.todayReaderProfile.value || null));
+elements.statsReaderProfile.addEventListener("change", () => setActiveReaderProfileId(elements.statsReaderProfile.value || null));
 
 async function loadAccountProfile(user) {
   const { data, error } = await supabase.from("study_user_profiles")
@@ -3307,9 +3475,42 @@ supabase.auth.onAuthStateChange((_event, session) => {
   showSession(session).catch((error) => showToast(error.message, true));
 });
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  });
+}
+
 const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
 if (sessionError) {
   elements.authMessage.textContent = `Could not check your sign-in: ${sessionError.message}`;
 } else {
   await showSession(sessionData.session);
+}
+
+function notePathFromHash() {
+  const match = window.location.hash.match(/^#note=(.+)$/);
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return "";
+  }
+}
+
+async function openHashNote() {
+  const path = notePathFromHash();
+  if (!path) return;
+  setActiveView("library");
+  await loadVault();
+  await openNote(path);
+}
+
+window.addEventListener("hashchange", () => {
+  const path = notePathFromHash();
+  if (path) openHashNote();
+});
+
+if (sessionData?.session && notePathFromHash()) {
+  openHashNote();
 }

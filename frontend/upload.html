@@ -6,6 +6,11 @@
     <meta name="theme-color" content="#111827">
     <title>Add handwritten notes — Scripture Study</title>
     <link rel="stylesheet" href="./styles.css">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Scripture Study">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>if (!window.supabase) document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>');</script>
     <script type="module" src="./upload.js"></script>
@@ -32,6 +37,7 @@
             Destination
             <select id="upload-destination" name="destination">
               <option value="auto">Auto-categorize from handwriting</option>
+              <option value="last" id="last-upload-option" hidden>Append to last uploaded note</option>
               <option value="existing">Add to an existing note</option>
             </select>
           </label>
