@@ -37,6 +37,11 @@ const state = {
   noteDirty: false,
   activeProfileId: null,
   readerProfiles: [],
+  registeredPartners: [],
+  registeredPartnerError: "",
+  prayers: [],
+  prayerCategories: [],
+  prayerRequestId: 0,
 };
 
 const elements = {
@@ -50,6 +55,51 @@ const elements = {
   statsRefreshButton: document.querySelector("#stats-refresh-button"),
   statsStatus: document.querySelector("#stats-status"),
   statsSummary: document.querySelector("#stats-summary"),
+  prayersView: document.querySelector("#prayers-view"),
+  prayerAddToggle: document.querySelector("#prayer-add-toggle"),
+  prayerCategoriesToggle: document.querySelector("#prayer-categories-toggle"),
+  prayerFormPanel: document.querySelector("#prayer-form-panel"),
+  prayerForm: document.querySelector("#prayer-form"),
+  prayerEditId: document.querySelector("#prayer-edit-id"),
+  prayerFormTitle: document.querySelector("#prayer-form-title"),
+  prayerTitle: document.querySelector("#prayer-title"),
+  prayerDetails: document.querySelector("#prayer-details"),
+  prayerCategory: document.querySelector("#prayer-category"),
+  prayerNewCategoryField: document.querySelector("#prayer-new-category-field"),
+  prayerNewCategory: document.querySelector("#prayer-new-category"),
+  prayerScriptureRef: document.querySelector("#prayer-scripture-ref"),
+  prayerSharedEmail: document.querySelector("#prayer-shared-email"),
+  prayerPin: document.querySelector("#prayer-pin"),
+  prayerSaveButton: document.querySelector("#prayer-save-button"),
+  prayerCancelEdit: document.querySelector("#prayer-cancel-edit"),
+  prayerFormMessage: document.querySelector("#prayer-form-message"),
+  prayerCategoriesPanel: document.querySelector("#prayer-categories-panel"),
+  prayerCategoryForm: document.querySelector("#prayer-category-form"),
+  prayerCategoryName: document.querySelector("#prayer-category-name"),
+  prayerCategoryList: document.querySelector("#prayer-category-list"),
+  prayerCategoryMessage: document.querySelector("#prayer-category-message"),
+  prayerFilterCategory: document.querySelector("#prayer-filter-category"),
+  prayerSearch: document.querySelector("#prayer-search"),
+  prayerSort: document.querySelector("#prayer-sort"),
+  prayersStatus: document.querySelector("#prayers-status"),
+  activePrayerList: document.querySelector("#active-prayer-list"),
+  prayerArchiveCount: document.querySelector("#prayer-archive-count"),
+  prayerArchiveEmpty: document.querySelector("#prayer-archive-empty"),
+  prayerArchiveList: document.querySelector("#prayer-archive-list"),
+  prayerPassagePreview: document.querySelector("#prayer-passage-preview"),
+  prayerPassageTitle: document.querySelector("#prayer-passage-title"),
+  prayerPassageResult: document.querySelector("#prayer-passage-result"),
+  prayerPassageClose: document.querySelector("#prayer-passage-close"),
+  prayerAnsweredDialog: document.querySelector("#prayer-answered-dialog"),
+  prayerAnsweredForm: document.querySelector("#prayer-answered-form"),
+  prayerAnsweredId: document.querySelector("#prayer-answered-id"),
+  prayerAnsweredDate: document.querySelector("#prayer-answered-date"),
+  prayerAnswerNote: document.querySelector("#prayer-answer-note"),
+  prayerAnswerMessage: document.querySelector("#prayer-answer-message"),
+  prayerAnswerSubmit: document.querySelector("#prayer-answer-submit"),
+  prayerAnswerCancel: document.querySelector("#prayer-answer-cancel"),
+  pinnedPrayersCard: document.querySelector("#pinned-prayers-card"),
+  pinnedPrayersList: document.querySelector("#pinned-prayers-list"),
   statsTestamentProgress: document.querySelector("#stats-testament-progress"),
   statsBookList: document.querySelector("#stats-book-list"),
   folderGrid: document.querySelector("#folder-grid"),
@@ -171,7 +221,8 @@ const elements = {
   bookPlanIntervalField: document.querySelector("#book-plan-interval-field"),
   bookPlanWeekdaysField: document.querySelector("#book-plan-weekdays-field"),
   bookPlanStartDate: document.querySelector("#book-plan-start-date"),
-  bookPlanPartnerEmail: document.querySelector("#book-plan-partner-email"),
+  bookPlanPartnerProfiles: document.querySelector("#book-plan-partner-profiles"),
+  bookPlanPartnerHelp: document.querySelector("#book-plan-partner-help"),
   bookPlanPreview: document.querySelector("#book-plan-preview"),
   bookPlanPreviewSummary: document.querySelector("#book-plan-preview-summary"),
   bookPlanPreviewFinish: document.querySelector("#book-plan-preview-finish"),
@@ -2042,7 +2093,7 @@ function appendBookReadingItem(list, plan, reading, date, overdue = false) {
   const planTitle = document.createElement("span");
   planTitle.className = "reading-date";
   let titleText = overdue ? `Overdue · ${formatDate(date)} · ${plan.title}` : plan.title;
-  if (plan.collaborator_email) {
+  if (plan.collaborator_email || plan.collaborator_profile_ids?.length || plan.collaborator_user_ids?.length) {
     titleText += " · 👥 Shared";
   }
   planTitle.textContent = titleText;
@@ -2094,7 +2145,14 @@ function renderBookReadingPlans(plans, date, overdueReadings = [], completedPlan
   elements.bookPlanOverdueSection.hidden = overdueReadings.length === 0;
   overdueReadings.forEach((reading) => appendBookReadingItem(
     elements.bookPlanOverdueList,
-    { id: reading.plan_id, title: reading.title, collaborator_email: reading.collaborator_email, status: "active" },
+    {
+      id: reading.plan_id,
+      title: reading.title,
+      collaborator_email: reading.collaborator_email,
+      collaborator_profile_ids: reading.collaborator_profile_ids,
+      collaborator_user_ids: reading.collaborator_user_ids,
+      status: "active",
+    },
     { item_id: reading.item_id, reference: reading.reference, completed: false, skipped: false },
     reading.scheduled_date,
     true,
@@ -2125,13 +2183,23 @@ function renderBookPlanSettings(plans) {
     status.textContent = plan.status === "paused" ? "Paused" : plan.status === "completed" ? "Completed" : "Active";
     details.append(status);
 
-    if (plan.collaborator_email) {
+    const collaboratorNames = (plan.collaborator_profile_ids || [])
+      .map((profileId) => state.readerProfiles.find((profile) => profile.id === profileId)?.name || "another profile");
+    const accountNames = (plan.collaborator_user_ids || [])
+      .map((userId) => state.registeredPartners.find((account) => account.user_id === userId)?.display_name || "registered account");
+    collaboratorNames.push(...accountNames);
+    if (plan.collaborator_email) collaboratorNames.unshift("partner account");
+    if (collaboratorNames.length) {
       const shared = document.createElement("span");
       shared.className = "plan-badge shared";
-      const isPartner = state.userEmail && state.userEmail.toLowerCase() === plan.collaborator_email.toLowerCase();
+      const isPartner = (plan.collaborator_user_ids || []).includes(state.userId)
+        || (plan.collaborator_email
+          && state.userEmail
+          && state.userEmail.toLowerCase() === plan.collaborator_email.toLowerCase());
+      const ownerName = state.registeredPartners.find((account) => account.user_id === plan.user_id)?.display_name;
       shared.textContent = isPartner
-        ? `👥 Shared by ${plan.owner_email || "partner"}`
-        : `👥 Shared with ${plan.collaborator_email}`;
+        ? `👥 Shared by ${ownerName || "partner"}`
+        : `👥 Shared with ${collaboratorNames.join(", ")}`;
       details.append(shared);
     }
 
@@ -2647,9 +2715,16 @@ function bookPlanScheduleValues() {
     cadence_type: cadenceType,
     interval_days: cadenceType === "interval" ? Number(elements.bookPlanInterval.value) : 1,
     weekdays: cadenceType === "weekdays" ? weekdays : null,
-    collaborator_email: elements.bookPlanPartnerEmail.value.trim().toLowerCase() || null,
+    collaborator_profile_ids: selectedPlanPartnerIds("profile"),
+    collaborator_user_ids: selectedPlanPartnerIds("account"),
     start_date: elements.bookPlanStartDate.value,
   };
+}
+
+function canEditPlanPartners(plan) {
+  if (!plan.profile_id) return plan.user_id === state.userId;
+  const profile = state.readerProfiles.find((readerProfile) => readerProfile.id === plan.profile_id);
+  return profile?.owner_user_id === state.userId;
 }
 
 function editBookReadingPlan(plan) {
@@ -2668,7 +2743,14 @@ function editBookReadingPlan(plan) {
   document.querySelectorAll('input[name="book-plan-day"]').forEach((checkbox) => {
     checkbox.checked = planWeekdays.includes(Number(checkbox.value));
   });
-  elements.bookPlanPartnerEmail.value = plan.collaborator_email || "";
+  elements.bookPlanForm.dataset.planProfileId = plan.profile_id || "";
+  elements.bookPlanForm.dataset.planUserId = plan.user_id;
+  renderBookPlanPartnerProfiles(
+    plan.profile_id,
+    plan.collaborator_profile_ids || [],
+    plan.collaborator_user_ids || [],
+    canEditPlanPartners(plan),
+  );
   elements.bookPlanStartDate.value = plan.plan_items.find((item) => item.status === "pending")?.scheduled_date || plan.start_date;
   elements.bookPlanSaveButton.textContent = "Save changes";
   updateBookPlanCadenceUI();
@@ -2680,6 +2762,8 @@ function editBookReadingPlan(plan) {
 function resetBookPlanForm() {
   elements.bookPlanForm.reset();
   elements.bookPlanEditId.value = "";
+  delete elements.bookPlanForm.dataset.planProfileId;
+  delete elements.bookPlanForm.dataset.planUserId;
   elements.bookPlanSaveButton.textContent = "Create plan";
   elements.bookPlanStartDate.value = dateKeyInNewYork();
   elements.bookPlanCadenceType.value = "interval";
@@ -2687,7 +2771,7 @@ function resetBookPlanForm() {
   document.querySelectorAll('input[name="book-plan-day"]').forEach((checkbox) => {
     checkbox.checked = false;
   });
-  elements.bookPlanPartnerEmail.value = "";
+  renderBookPlanPartnerProfiles(state.activeProfileId, [], []);
   state.selectedBookPlanBooks = [];
   renderBookPlanSelectedBooks();
   updateBookPlanCadenceUI();
@@ -2775,10 +2859,522 @@ async function deleteBookReadingPlan(plan) {
   }
 }
 
+// --- Prayer lists, categories, updates, and archive ---
+function appendPrayerAction(container, label, action, prayerId, className = "button button-quiet") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.dataset.prayerAction = action;
+  button.dataset.prayerId = prayerId;
+  button.textContent = label;
+  container.append(button);
+  return button;
+}
+
+function renderPrayerUpdates(updates = []) {
+  const list = document.createElement("ul");
+  list.className = "prayer-updates";
+  (Array.isArray(updates) ? updates : []).forEach((update) => {
+    const item = document.createElement("li");
+    const date = document.createElement("time");
+    date.dateTime = update.created_at || "";
+    date.textContent = update.created_at ? formatDate(prayerDateKey(update.created_at)) : "Undated";
+    const text = document.createElement("p");
+    text.textContent = update.text || "";
+    item.append(date, text);
+    if (update.author_email) {
+      const author = document.createElement("small");
+      author.textContent = update.author_email;
+      item.append(author);
+    }
+    list.append(item);
+  });
+  return list;
+}
+
+function prayerDateKey(value) {
+  const text = String(value || "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const date = new Date(text);
+  return Number.isFinite(date.getTime()) ? dateKeyInNewYork(date) : "";
+}
+
+function daysBetween(first, last) {
+  const firstKey = prayerDateKey(first);
+  const lastKey = prayerDateKey(last);
+  const firstDay = Date.parse(`${firstKey}T00:00:00Z`);
+  const lastDay = Date.parse(`${lastKey}T00:00:00Z`);
+  if (!Number.isFinite(firstDay) || !Number.isFinite(lastDay)) return 0;
+  return Math.max(0, Math.floor((lastDay - firstDay) / 86400000));
+}
+
+function lastPrayedText(prayer) {
+  if (!prayer.last_prayed_at) return `Never prayed · Prayed ${prayer.pray_count || 0} times`;
+  const days = daysBetween(prayer.last_prayed_at, new Date());
+  const when = days === 0 ? "today" : `${days} ${days === 1 ? "day" : "days"} ago`;
+  return `Last prayed ${when} · Prayed ${prayer.pray_count || 0} ${prayer.pray_count === 1 ? "time" : "times"}`;
+}
+
+function createPrayerSummary(prayer, showRequestedDate = false) {
+  const summary = document.createElement("div");
+  summary.className = "prayer-meta";
+  const category = document.createElement("span");
+  category.className = "prayer-badge";
+  category.textContent = prayer.category_name || "General";
+  summary.append(category);
+  if (prayer.shared_with_email) {
+    const shared = document.createElement("span");
+    shared.className = "prayer-badge shared";
+    shared.textContent = prayer.user_id === state.userId
+      ? "Shared"
+      : `Shared by ${prayer.owner_email || "spouse"}`;
+    summary.append(shared);
+  }
+  if (prayer.is_pinned) {
+    const pinned = document.createElement("span");
+    pinned.className = "prayer-badge pinned";
+    pinned.textContent = "Pinned";
+    summary.append(pinned);
+  }
+  if (showRequestedDate) {
+    const requested = document.createElement("span");
+    requested.className = "prayer-date";
+    requested.textContent = `Requested ${formatDate(prayerDateKey(prayer.created_at))}`;
+    summary.append(requested);
+  }
+  return summary;
+}
+
+function createPrayerCard(prayer, archived = false) {
+  const card = document.createElement("article");
+  card.className = archived ? "prayer-card prayer-archive-card" : "prayer-card";
+  card.dataset.prayerId = prayer.id;
+  const heading = document.createElement("div");
+  heading.className = "prayer-card-heading";
+  const title = document.createElement("h3");
+  title.textContent = prayer.title;
+  heading.append(title, createPrayerSummary(prayer, archived));
+  card.append(heading);
+
+  if (prayer.details) {
+    const details = document.createElement("p");
+    details.className = "prayer-details";
+    details.textContent = prayer.details;
+    card.append(details);
+  }
+  if (prayer.scripture_ref) {
+    const reference = document.createElement("button");
+    reference.type = "button";
+    reference.className = "prayer-scripture-link";
+    reference.dataset.prayerReference = prayer.scripture_ref;
+    reference.textContent = prayer.scripture_ref;
+    card.append(reference);
+  }
+  if (archived) {
+    const answered = document.createElement("p");
+    answered.className = "prayer-answered-dates";
+    const duration = daysBetween(prayer.created_at, prayer.answered_at);
+    answered.textContent = `Answered ${formatDate(prayer.answered_at)} · Prayed for ${duration} ${duration === 1 ? "day" : "days"}`;
+    card.append(answered);
+    if (prayer.answer_note) {
+      const praise = document.createElement("p");
+      praise.className = "prayer-answer-note";
+      praise.textContent = prayer.answer_note;
+      card.append(praise);
+    }
+  } else {
+    const prayed = document.createElement("p");
+    prayed.className = "prayer-last-prayed";
+    prayed.textContent = lastPrayedText(prayer);
+    card.append(prayed);
+  }
+
+  if (Array.isArray(prayer.updates) && prayer.updates.length) {
+    const updateHeading = document.createElement("h4");
+    updateHeading.className = "prayer-updates-heading";
+    updateHeading.textContent = "Updates";
+    card.append(updateHeading, renderPrayerUpdates(prayer.updates));
+  }
+  const actions = document.createElement("div");
+  actions.className = "prayer-card-actions";
+  if (archived) {
+    appendPrayerAction(actions, "Reopen", "reopen", prayer.id);
+    appendPrayerAction(actions, "Delete", "delete", prayer.id, "button button-danger");
+  } else {
+    appendPrayerAction(actions, "Prayed", "prayed", prayer.id, "button button-primary");
+    appendPrayerAction(actions, "Add update", "add-update", prayer.id);
+    appendPrayerAction(actions, prayer.is_pinned ? "Unpin" : "Pin", "pin", prayer.id);
+    appendPrayerAction(actions, "Edit", "edit", prayer.id);
+    appendPrayerAction(actions, "Delete", "delete", prayer.id, "button button-danger");
+    appendPrayerAction(actions, "God Answered", "answered", prayer.id);
+  }
+  card.append(actions);
+  return card;
+}
+
+function renderPrayerCategoryOptions() {
+  const selectedFilter = elements.prayerFilterCategory.value || "all";
+  const selectedCategory = elements.prayerCategory.value || "General";
+  const categoryNames = [...new Set([
+    "General",
+    ...state.prayerCategories.map((category) => category.name),
+    ...state.prayers.map((prayer) => prayer.category_name).filter(Boolean),
+  ])].sort((left, right) => left.localeCompare(right));
+  elements.prayerCategory.replaceChildren(new Option("General", "General"));
+  categoryNames.filter((name) => name.toLowerCase() !== "general")
+    .forEach((name) => elements.prayerCategory.append(new Option(name, name)));
+  elements.prayerCategory.append(new Option("Create a new category…", "__new_category__"));
+  elements.prayerCategory.value = categoryNames.includes(selectedCategory) || selectedCategory === "General"
+    ? selectedCategory
+    : "General";
+
+  elements.prayerFilterCategory.replaceChildren(new Option("All", "all"));
+  categoryNames.forEach((name) => elements.prayerFilterCategory.append(new Option(name, `category:${name}`)));
+  elements.prayerFilterCategory.append(new Option("Shared", "shared"), new Option("Pinned", "pinned"));
+  elements.prayerFilterCategory.value = [...elements.prayerFilterCategory.options]
+    .some((option) => option.value === selectedFilter) ? selectedFilter : "all";
+}
+
+function renderPrayerCategories() {
+  elements.prayerCategoryList.replaceChildren();
+  if (!state.prayerCategories.length) {
+    const empty = document.createElement("li");
+    empty.className = "empty-state";
+    empty.textContent = "No custom categories yet.";
+    elements.prayerCategoryList.append(empty);
+    return;
+  }
+  state.prayerCategories.forEach((category) => {
+    const row = document.createElement("li");
+    row.className = "prayer-category-item";
+    row.dataset.prayerId = category.id;
+    const name = document.createElement("span");
+    name.className = "prayer-category-label";
+    name.textContent = category.name;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = category.name;
+    input.maxLength = 60;
+    input.className = "prayer-category-rename";
+    input.hidden = true;
+    input.setAttribute("aria-label", `Rename ${category.name}`);
+    const actions = document.createElement("div");
+    actions.className = "prayer-category-actions";
+    appendPrayerAction(actions, "Rename", "rename-category", category.id);
+    appendPrayerAction(actions, "Save", "save-category", category.id);
+    appendPrayerAction(actions, "Delete", "delete-category", category.id, "button button-danger");
+    actions.querySelector('[data-prayer-action="save-category"]').hidden = true;
+    row.append(name, input, actions);
+    elements.prayerCategoryList.append(row);
+  });
+}
+
+function renderPrayerList() {
+  const active = state.prayers.filter((prayer) => prayer.status === "active");
+  const archived = state.prayers.filter((prayer) => prayer.status === "answered")
+    .sort((left, right) => String(right.answered_at || "").localeCompare(String(left.answered_at || "")));
+  const filter = elements.prayerFilterCategory.value || "all";
+  const search = elements.prayerSearch.value.trim().toLocaleLowerCase();
+  const filtered = active.filter((prayer) => {
+    if (filter === "pinned" && !prayer.is_pinned) return false;
+    if (filter === "shared" && !prayer.shared_with_email) return false;
+    if (filter.startsWith("category:") && prayer.category_name !== filter.slice("category:".length)) return false;
+    if (search) {
+      const haystack = [
+        prayer.title,
+        prayer.details,
+        prayer.category_name,
+        prayer.scripture_ref,
+        ...(Array.isArray(prayer.updates) ? prayer.updates.map((update) => update.text) : []),
+      ].join(" ").toLocaleLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  }).sort((left, right) => {
+    if (left.is_pinned !== right.is_pinned) return left.is_pinned ? -1 : 1;
+    if (elements.prayerSort.value === "newest") return String(right.created_at).localeCompare(String(left.created_at));
+    if (elements.prayerSort.value === "oldest") return String(left.created_at).localeCompare(String(right.created_at));
+    if (!left.last_prayed_at || !right.last_prayed_at) {
+      if (!left.last_prayed_at && right.last_prayed_at) return -1;
+      if (left.last_prayed_at && !right.last_prayed_at) return 1;
+    } else {
+      const prayedOrder = String(left.last_prayed_at).localeCompare(String(right.last_prayed_at));
+      if (prayedOrder) return prayedOrder;
+    }
+    return String(left.created_at).localeCompare(String(right.created_at));
+  });
+  elements.activePrayerList.replaceChildren();
+  if (!filtered.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state prayer-list-empty";
+    empty.textContent = active.length ? "No prayers match these filters." : "No active prayers yet. Add a request to begin.";
+    elements.activePrayerList.append(empty);
+  } else {
+    filtered.forEach((prayer) => elements.activePrayerList.append(createPrayerCard(prayer)));
+  }
+  elements.prayerArchiveList.replaceChildren();
+  archived.forEach((prayer) => elements.prayerArchiveList.append(createPrayerCard(prayer, true)));
+  elements.prayerArchiveCount.textContent = `${archived.length} ${archived.length === 1 ? "prayer" : "prayers"}`;
+  elements.prayerArchiveEmpty.hidden = archived.length > 0;
+  elements.prayerArchiveEmpty.textContent = "Answered prayers will appear here.";
+  renderPrayerCategoryOptions();
+  renderPrayerCategories();
+  renderPinnedPrayers();
+}
+
+function renderPinnedPrayers() {
+  const pinned = state.prayers.filter((prayer) => prayer.status === "active" && prayer.is_pinned);
+  elements.pinnedPrayersList.replaceChildren();
+  elements.pinnedPrayersCard.hidden = pinned.length === 0;
+  pinned.forEach((prayer) => {
+    const row = document.createElement("li");
+    row.className = "pinned-prayer-item";
+    const details = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = prayer.title;
+    const category = document.createElement("small");
+    category.textContent = prayer.category_name || "General";
+    details.append(title, category);
+    row.append(details, appendPrayerAction(document.createElement("div"), "Prayed", "prayed", prayer.id, "button button-primary"));
+    elements.pinnedPrayersList.append(row);
+  });
+}
+
+async function loadPrayers() {
+  elements.prayersStatus.hidden = false;
+  elements.prayersStatus.textContent = "Loading prayers…";
+  try {
+    const [categories, prayers] = await Promise.all([
+      requestJson("/api/prayer-categories"),
+      requestJson("/api/prayers"),
+    ]);
+    state.prayerCategories = categories;
+    state.prayers = prayers;
+    elements.prayersStatus.hidden = true;
+    renderPrayerList();
+  } catch (error) {
+    elements.prayersStatus.textContent = `Could not load prayers: ${error.message}`;
+    elements.prayersStatus.hidden = false;
+    state.prayers = [];
+    renderPrayerList();
+  }
+}
+
+function resetPrayerForm() {
+  elements.prayerForm.reset();
+  elements.prayerEditId.value = "";
+  elements.prayerFormTitle.textContent = "Add a prayer";
+  elements.prayerSaveButton.textContent = "Save prayer";
+  elements.prayerNewCategoryField.hidden = true;
+  elements.prayerNewCategory.required = false;
+  elements.prayerSharedEmail.disabled = false;
+  elements.prayerFormMessage.textContent = "";
+  elements.prayerAddToggle.setAttribute("aria-expanded", "false");
+  elements.prayerFormPanel.hidden = true;
+  renderPrayerCategoryOptions();
+}
+
+function editPrayer(prayer) {
+  elements.prayerFormPanel.hidden = false;
+  elements.prayerAddToggle.setAttribute("aria-expanded", "true");
+  elements.prayerEditId.value = prayer.id;
+  elements.prayerFormTitle.textContent = "Edit prayer";
+  elements.prayerSaveButton.textContent = "Save changes";
+  elements.prayerTitle.value = prayer.title;
+  elements.prayerDetails.value = prayer.details || "";
+  renderPrayerCategoryOptions();
+  if (![...elements.prayerCategory.options].some((option) => option.value === prayer.category_name)) {
+    elements.prayerCategory.insertBefore(new Option(prayer.category_name, prayer.category_name), elements.prayerCategory.lastElementChild);
+  }
+  elements.prayerCategory.value = prayer.category_name || "General";
+  elements.prayerScriptureRef.value = prayer.scripture_ref || "";
+  elements.prayerSharedEmail.value = prayer.shared_with_email || "";
+  elements.prayerSharedEmail.disabled = prayer.user_id !== state.userId;
+  elements.prayerPin.checked = Boolean(prayer.is_pinned);
+  elements.prayerTitle.focus();
+}
+
+async function submitPrayerForm(event) {
+  event.preventDefault();
+  elements.prayerSaveButton.disabled = true;
+  elements.prayerFormMessage.textContent = "Saving prayer…";
+  try {
+    if (elements.prayerScriptureRef.value.trim() && !findBibleReference(elements.prayerScriptureRef.value.trim())) {
+      throw new Error("Enter a valid Bible reference, such as Philippians 4:6-7.");
+    }
+    let categoryName = elements.prayerCategory.value;
+    if (categoryName === "__new_category__") {
+      const category = await requestJson("/api/prayer-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: elements.prayerNewCategory.value }),
+      });
+      categoryName = category.name;
+    }
+    const id = elements.prayerEditId.value;
+    await requestJson(id ? `/api/prayers/${id}` : "/api/prayers", {
+      method: id ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: elements.prayerTitle.value,
+        details: elements.prayerDetails.value,
+        category_name: categoryName,
+        scripture_ref: elements.prayerScriptureRef.value,
+        shared_with_email: elements.prayerSharedEmail.value,
+        is_pinned: elements.prayerPin.checked,
+      }),
+    });
+    resetPrayerForm();
+    await loadPrayers();
+    showToast(id ? "Prayer updated." : "Prayer added.");
+  } catch (error) {
+    elements.prayerFormMessage.textContent = error.message;
+  } finally {
+    elements.prayerSaveButton.disabled = false;
+  }
+}
+
+async function performPrayerAction(action, prayerId) {
+  const prayer = state.prayers.find((item) => item.id === prayerId);
+  if (!prayer && action !== "delete-category" && action !== "save-category" && action !== "rename-category") return;
+  try {
+    if (action === "prayed") {
+      await requestJson(`/api/prayers/${prayerId}/prayed`, { method: "POST" });
+      await loadPrayers();
+      showToast("Prayer marked as prayed.");
+    } else if (action === "pin") {
+      await requestJson(`/api/prayers/${prayerId}/pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_pinned: !prayer.is_pinned }),
+      });
+      await loadPrayers();
+    } else if (action === "edit") {
+      editPrayer(prayer);
+    } else if (action === "delete") {
+      if (!window.confirm(`Delete the prayer “${prayer.title}”?`)) return;
+      await requestJson(`/api/prayers/${prayerId}`, { method: "DELETE" });
+      await loadPrayers();
+      await loadReadingStatisticsIfVisible();
+      showToast("Prayer deleted.");
+    } else if (action === "answered") {
+      elements.prayerAnsweredForm.reset();
+      elements.prayerAnsweredId.value = prayerId;
+      elements.prayerAnsweredDate.value = dateKeyInNewYork();
+      elements.prayerAnswerMessage.textContent = "";
+      elements.prayerAnsweredDialog.showModal();
+    } else if (action === "reopen") {
+      await requestJson(`/api/prayers/${prayerId}/reopen`, { method: "POST" });
+      await loadPrayers();
+      await loadReadingStatisticsIfVisible();
+      showToast("Prayer reopened.");
+    } else if (action === "add-update") {
+      showPrayerUpdateForm(prayerId);
+    } else if (action === "delete-category") {
+      const category = state.prayerCategories.find((item) => item.id === prayerId);
+      if (!category || !window.confirm(`Delete the “${category.name}” category?`)) return;
+      await requestJson(`/api/prayer-categories/${prayerId}`, { method: "DELETE" });
+      await loadPrayers();
+      elements.prayerCategoryMessage.textContent = "Category deleted.";
+    } else if (action === "rename-category") {
+      const row = elements.prayerCategoryList.querySelector(`[data-prayer-id="${prayerId}"]`);
+      if (!row) return;
+      row.querySelector(".prayer-category-label").setAttribute("hidden", "");
+      row.querySelector(".prayer-category-rename").removeAttribute("hidden");
+      row.querySelector('[data-prayer-action="rename-category"]').hidden = true;
+      row.querySelector('[data-prayer-action="save-category"]').hidden = false;
+      row.querySelector(".prayer-category-rename").focus();
+    } else if (action === "save-category") {
+      const row = elements.prayerCategoryList.querySelector(`[data-prayer-id="${prayerId}"]`);
+      const name = row?.querySelector(".prayer-category-rename").value || "";
+      await requestJson(`/api/prayer-categories/${prayerId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      await loadPrayers();
+      elements.prayerCategoryMessage.textContent = "Category updated.";
+    }
+  } catch (error) {
+    if (action === "answered") elements.prayerAnswerMessage.textContent = error.message;
+    else showToast(error.message, true);
+  }
+}
+
+function showPrayerUpdateForm(prayerId) {
+  const card = elements.activePrayerList.querySelector(`[data-prayer-id="${prayerId}"]`);
+  if (!card || card.querySelector(".prayer-update-form")) return;
+  const form = document.createElement("form");
+  form.className = "prayer-update-form";
+  form.dataset.prayerId = prayerId;
+  const input = document.createElement("textarea");
+  input.rows = 2;
+  input.maxLength = 2000;
+  input.required = true;
+  input.placeholder = "Add a progress update…";
+  input.setAttribute("aria-label", "Prayer update");
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.className = "button button-primary";
+  submit.textContent = "Save update";
+  form.append(input, submit);
+  card.append(form);
+  input.focus();
+}
+
+async function submitPrayerUpdate(event) {
+  event.preventDefault();
+  const form = event.target;
+  const submit = form.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  try {
+    await requestJson(`/api/prayers/${form.dataset.prayerId}/updates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: form.querySelector("textarea").value }),
+    });
+    await loadPrayers();
+    showToast("Prayer update added.");
+  } catch (error) {
+    showToast(error.message, true);
+    submit.disabled = false;
+  }
+}
+
+async function showPrayerPassage(reference) {
+  const normalizedReference = findBibleReference(reference);
+  if (!normalizedReference) {
+    showToast("This prayer has an invalid Scripture reference.", true);
+    return;
+  }
+  const requestId = ++state.prayerRequestId;
+  elements.prayerPassagePreview.hidden = false;
+  elements.prayerPassageTitle.textContent = normalizedReference;
+  elements.prayerPassageResult.replaceChildren();
+  const loading = document.createElement("p");
+  loading.className = "muted";
+  loading.textContent = "Loading passage…";
+  elements.prayerPassageResult.append(loading);
+  try {
+    const payload = await requestJson(`/api/esv?q=${encodeURIComponent(normalizedReference)}`);
+    if (requestId !== state.prayerRequestId) return;
+    elements.prayerPassageTitle.textContent = payload.reference;
+    elements.prayerPassageResult.replaceChildren();
+    renderPassageVerses(payload.text, elements.prayerPassageResult);
+  } catch (error) {
+    if (requestId !== state.prayerRequestId) return;
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = error.message;
+    elements.prayerPassageResult.replaceChildren(message);
+  }
+}
+
 // --- Reading statistics and scripture coverage ---
 function appendStatCard(title, value, description) {
   const card = document.createElement("article");
   card.className = "stats-card panel-card";
+  if (title === "ANSWERED PRAYERS") card.classList.add("stats-card-quiet");
   const label = document.createElement("p");
   label.className = "eyebrow";
   label.textContent = title;
@@ -2792,13 +3388,16 @@ function appendStatCard(title, value, description) {
   elements.statsSummary.append(card);
 }
 
-function renderReadingStatistics(stats) {
+function renderReadingStatistics(stats, answeredPrayerTotal = null) {
   elements.statsStatus.hidden = true;
   elements.statsSummary.replaceChildren();
   elements.statsTestamentProgress.replaceChildren();
   elements.statsBookList.replaceChildren();
   if (!state.activeProfileId) {
     appendStatCard("NOTES TAKEN", stats.note_count.toLocaleString(), "Notes in your study library");
+    if (Number.isInteger(answeredPrayerTotal)) {
+      appendStatCard("ANSWERED PRAYERS", answeredPrayerTotal.toLocaleString(), "Prayers moved to your archive");
+    }
   }
   appendStatCard("CHAPTERS READ", stats.chapter_reads.toLocaleString(), "Includes rereading the same chapter");
   appendStatCard("BIBLE READ-THROUGHS", stats.bible_read_throughs.toLocaleString(), "How many times you've read the entire Bible");
@@ -2880,7 +3479,21 @@ async function loadReadingStatistics() {
   elements.statsStatus.hidden = false;
   elements.statsStatus.textContent = "Loading your reading stats…";
   try {
-    renderReadingStatistics(await requestJson("/api/reading-statistics"));
+    const stats = await requestJson("/api/reading-statistics");
+    let answeredPrayerTotal = null;
+    let prayerCountError = "";
+    if (!state.activeProfileId) {
+      try {
+        answeredPrayerTotal = (await requestJson("/api/prayers/answered-count")).count;
+      } catch (error) {
+        prayerCountError = error.message;
+      }
+    }
+    renderReadingStatistics(stats, answeredPrayerTotal);
+    if (prayerCountError) {
+      elements.statsStatus.hidden = false;
+      elements.statsStatus.textContent = `Could not load answered prayer count: ${prayerCountError}`;
+    }
   } catch (error) {
     elements.statsSummary.replaceChildren();
     elements.statsTestamentProgress.replaceChildren();
@@ -2893,7 +3506,7 @@ async function loadReadingStatistics() {
 
 // --- View switching and Bible passage lookup ---
 function setActiveView(view) {
-  const nextView = ["today", "stats", "account"].includes(view) ? view : "library";
+  const nextView = ["today", "prayers", "stats", "account"].includes(view) ? view : "library";
   if (state.noteDirty && state.activeView !== nextView) {
     if (!window.confirm("Discard unsaved note changes and switch views?")) return false;
     state.noteDirty = false;
@@ -2902,6 +3515,7 @@ function setActiveView(view) {
   const showingToday = state.activeView === "today";
   elements.libraryView.hidden = state.activeView !== "library";
   elements.todayView.hidden = !showingToday;
+  elements.prayersView.hidden = state.activeView !== "prayers";
   elements.statsView.hidden = state.activeView !== "stats";
   elements.accountView.hidden = state.activeView !== "account";
   elements.navLinks.forEach((link) => {
@@ -2963,13 +3577,13 @@ async function lookupEsvReference(reference) {
   }
 }
 
-function renderPassageVerses(text) {
+function renderPassageVerses(text, container = elements.esvResult) {
   const markers = [...text.matchAll(/\[(\d+)\]\s*/g)];
   if (!markers.length) {
     const paragraph = document.createElement("p");
     paragraph.className = "esv-unmarked-text";
     paragraph.textContent = text;
-    elements.esvResult.append(paragraph);
+    container.append(paragraph);
     return;
   }
 
@@ -2978,7 +3592,7 @@ function renderPassageVerses(text) {
     const paragraph = document.createElement("p");
     paragraph.className = "esv-unmarked-text";
     paragraph.textContent = introduction;
-    elements.esvResult.append(paragraph);
+    container.append(paragraph);
   }
 
   const verses = document.createElement("div");
@@ -2994,7 +3608,7 @@ function renderPassageVerses(text) {
     verse.append(number, document.createTextNode(` ${text.slice(start, end).trim()}`));
     verses.append(verse);
   });
-  elements.esvResult.append(verses);
+  container.append(verses);
 }
 
 // --- UI event wiring ---
@@ -3182,27 +3796,110 @@ elements.navLinks.forEach((link) => {
     }
     setActiveView(link.dataset.view);
     if (link.dataset.view === "today") loadReadingPlan();
+    if (link.dataset.view === "prayers") loadPrayers();
     if (link.dataset.view === "stats") loadReadingStatistics();
   });
 });
 window.addEventListener("popstate", () => {
   const targetView = !window.location.hash || window.location.hash === "#today"
     ? "today"
-    : window.location.hash === "#stats" ? "stats"
-      : window.location.hash === "#account" ? "account" : "library";
+    : window.location.hash === "#prayers" ? "prayers"
+      : window.location.hash === "#stats" ? "stats"
+        : window.location.hash === "#account" ? "account" : "library";
   setActiveView(targetView);
   if (targetView === "today") loadReadingPlan();
+  if (targetView === "prayers") loadPrayers();
   if (targetView === "stats") loadReadingStatistics();
 });
 elements.esvForm.addEventListener("submit", lookupEsv);
 elements.noteSearchForm.addEventListener("submit", searchNotes);
 elements.statsRefreshButton.addEventListener("click", loadReadingStatistics);
+elements.prayerAddToggle.addEventListener("click", () => {
+  const open = elements.prayerFormPanel.hidden;
+  elements.prayerFormPanel.hidden = !open;
+  elements.prayerAddToggle.setAttribute("aria-expanded", String(open));
+  if (open) elements.prayerTitle.focus();
+});
+elements.prayerCategoriesToggle.addEventListener("click", () => {
+  const open = elements.prayerCategoriesPanel.hidden;
+  elements.prayerCategoriesPanel.hidden = !open;
+  elements.prayerCategoriesToggle.setAttribute("aria-expanded", String(open));
+  if (open) elements.prayerCategoryName.focus();
+});
+elements.prayerCategory.addEventListener("change", () => {
+  const creating = elements.prayerCategory.value === "__new_category__";
+  elements.prayerNewCategoryField.hidden = !creating;
+  elements.prayerNewCategory.required = creating;
+  if (creating) elements.prayerNewCategory.focus();
+});
+elements.prayerForm.addEventListener("submit", submitPrayerForm);
+elements.prayerCancelEdit.addEventListener("click", resetPrayerForm);
+elements.prayerFilterCategory.addEventListener("change", renderPrayerList);
+elements.prayerSearch.addEventListener("input", renderPrayerList);
+elements.prayerSort.addEventListener("change", renderPrayerList);
+elements.prayerCategoryForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await requestJson("/api/prayer-categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: elements.prayerCategoryName.value }),
+    });
+    elements.prayerCategoryForm.reset();
+    await loadPrayers();
+    elements.prayerCategoryMessage.textContent = "Category added.";
+  } catch (error) {
+    elements.prayerCategoryMessage.textContent = error.message;
+  }
+});
+for (const list of [elements.activePrayerList, elements.prayerArchiveList, elements.pinnedPrayersList, elements.prayerCategoryList]) {
+  list.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("[data-prayer-action]") : null;
+    if (button) performPrayerAction(button.dataset.prayerAction, button.dataset.prayerId);
+  });
+  list.addEventListener("submit", submitPrayerUpdate);
+}
+for (const list of [elements.activePrayerList, elements.prayerArchiveList]) {
+  list.addEventListener("click", (event) => {
+    const reference = event.target instanceof Element ? event.target.closest("[data-prayer-reference]") : null;
+    if (reference) showPrayerPassage(reference.dataset.prayerReference);
+  });
+}
+elements.prayerPassageClose.addEventListener("click", () => {
+  state.prayerRequestId += 1;
+  elements.prayerPassagePreview.hidden = true;
+});
+elements.prayerAnsweredForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  elements.prayerAnswerSubmit.disabled = true;
+  elements.prayerAnswerMessage.textContent = "Saving answered prayer…";
+  try {
+    await requestJson(`/api/prayers/${elements.prayerAnsweredId.value}/answered`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        answered_at: elements.prayerAnsweredDate.value,
+        answer_note: elements.prayerAnswerNote.value,
+      }),
+    });
+    elements.prayerAnsweredDialog.close();
+    await loadPrayers();
+    await loadReadingStatisticsIfVisible();
+    showToast("Prayer moved to the archive.");
+  } catch (error) {
+    elements.prayerAnswerMessage.textContent = error.message;
+  } finally {
+    elements.prayerAnswerSubmit.disabled = false;
+  }
+});
+elements.prayerAnswerCancel.addEventListener("click", () => elements.prayerAnsweredDialog.close());
 
 // --- Initial route and authenticated-session lifecycle ---
 const initialView = !window.location.hash || window.location.hash === "#today"
   ? "today"
-  : window.location.hash === "#stats" ? "stats"
-    : window.location.hash === "#account" ? "account" : "library";
+  : window.location.hash === "#prayers" ? "prayers"
+    : window.location.hash === "#stats" ? "stats"
+      : window.location.hash === "#account" ? "account" : "library";
 if (!window.location.hash) {
   window.history.replaceState(null, "", "#today");
 }
@@ -3247,7 +3944,14 @@ async function showSession(session) {
   elements.accountMessage.textContent = "Loading your account name…";
   elements.signedInEmail.textContent = state.userEmail || "Signed in";
   if (state.userEmail) elements.signedInEmail.title = state.userEmail;
-  const requests = [loadVault(), loadReadingPlan(), loadAccountProfile(session.user), loadManagedReaderProfiles()];
+  const requests = [
+    loadVault(),
+    loadReadingPlan(),
+    loadPrayers(),
+    loadAccountProfile(session.user),
+    loadManagedReaderProfiles(),
+    loadRegisteredReadingPartners(),
+  ];
   if (state.activeView === "stats") requests.push(loadReadingStatistics());
   await Promise.all(requests);
 }
@@ -3262,6 +3966,17 @@ async function loadManagedReaderProfiles() {
   }
 }
 
+async function loadRegisteredReadingPartners() {
+  try {
+    state.registeredPartners = await requestJson("/api/reading-plan-partners");
+    state.registeredPartnerError = "";
+  } catch (error) {
+    state.registeredPartners = [];
+    state.registeredPartnerError = error.message;
+  }
+  renderReaderProfileSelectors();
+}
+
 function renderReaderProfileSelectors() {
   for (const select of [elements.todayReaderProfile, elements.statsReaderProfile]) {
     if (!select) continue;
@@ -3269,6 +3984,95 @@ function renderReaderProfileSelectors() {
     state.readerProfiles.forEach((profile) => select.append(new Option(profile.name, profile.id)));
     select.value = state.activeProfileId || "";
   }
+  const editingPlan = Boolean(elements.bookPlanEditId.value);
+  const canEditPartners = !editingPlan || canEditPlanPartners({
+    profile_id: elements.bookPlanForm.dataset.planProfileId || null,
+    user_id: elements.bookPlanForm.dataset.planUserId,
+  });
+  renderBookPlanPartnerProfiles(
+    editingPlan ? elements.bookPlanForm.dataset.planProfileId || null : state.activeProfileId,
+    undefined,
+    undefined,
+    canEditPartners,
+  );
+}
+
+function renderBookPlanPartnerProfiles(
+  excludedProfileId,
+  selectedProfileIds = selectedPlanPartnerIds("profile"),
+  selectedUserIds = selectedPlanPartnerIds("account"),
+  canEdit = true,
+) {
+  const selectedProfiles = new Set(selectedProfileIds.filter((profileId) => profileId && profileId !== excludedProfileId));
+  const selectedUsers = new Set(selectedUserIds.filter(Boolean));
+  const profiles = state.readerProfiles.filter((profile) => profile.id !== excludedProfileId);
+  const accounts = state.registeredPartners.filter((account) => account.user_id !== state.userId);
+  elements.bookPlanPartnerProfiles.replaceChildren();
+  const appendPartnerGroup = (title, items, idKey, nameKey, type, selectedIds, missingIds = []) => {
+    if (!items.length && !missingIds.length) return;
+    const group = document.createElement("div");
+    group.className = "book-plan-partner-group";
+    const heading = document.createElement("span");
+    heading.className = "book-plan-partner-heading";
+    heading.textContent = title;
+    group.append(heading);
+    const appendCheckbox = (name, id) => {
+      const label = document.createElement("label");
+      label.className = "book-plan-partner-option";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = id;
+      checkbox.dataset.partnerType = type;
+      checkbox.checked = selectedIds.has(id);
+      checkbox.disabled = !canEdit;
+      label.append(checkbox, document.createTextNode(name));
+      group.append(label);
+    };
+    items.forEach((item) => appendCheckbox(item[nameKey], item[idKey]));
+    missingIds.forEach((id) => appendCheckbox(
+      type === "profile"
+        ? "Unavailable profile"
+        : id === state.userId ? state.displayName || "Your account" : "Unavailable account",
+      id,
+    ));
+    elements.bookPlanPartnerProfiles.append(group);
+  };
+  const availableProfileIds = new Set(profiles.map((profile) => profile.id));
+  const availableAccountIds = new Set(accounts.map((account) => account.user_id));
+  appendPartnerGroup(
+    "Reader profiles",
+    profiles,
+    "id",
+    "name",
+    "profile",
+    selectedProfiles,
+    [...selectedProfiles].filter((profileId) => !availableProfileIds.has(profileId)),
+  );
+  appendPartnerGroup(
+    "Registered accounts",
+    accounts,
+    "user_id",
+    "display_name",
+    "account",
+    selectedUsers,
+    [...selectedUsers].filter((userId) => !availableAccountIds.has(userId)),
+  );
+  if (!profiles.length && !accounts.length && !selectedProfiles.size && !selectedUsers.size) {
+    const empty = document.createElement("span");
+    empty.className = "muted";
+    empty.textContent = "No other profiles or registered accounts available.";
+    elements.bookPlanPartnerProfiles.append(empty);
+  }
+  elements.bookPlanPartnerHelp.textContent = state.registeredPartnerError
+    ? `Could not load registered accounts: ${state.registeredPartnerError}`
+    : canEdit
+      ? "Select any profiles or registered accounts to share this plan with."
+      : "Only the owner profile can change who this plan is shared with.";
+}
+
+function selectedPlanPartnerIds(type) {
+  return [...elements.bookPlanPartnerProfiles.querySelectorAll(`input[data-partner-type="${type}"]:checked`)]
+    .map((checkbox) => checkbox.value);
 }
 
 function renderManagedReaderProfiles() {
@@ -3411,6 +4215,34 @@ function clearSignedOutState() {
   state.userId = null;
   state.userEmail = null;
   state.displayName = null;
+  state.registeredPartners = [];
+  state.registeredPartnerError = "";
+  state.readerProfiles = [];
+  state.prayers = [];
+  state.prayerCategories = [];
+  state.prayerRequestId += 1;
+  elements.prayersStatus.hidden = false;
+  elements.prayersStatus.textContent = "Sign in to load prayers.";
+  elements.activePrayerList.replaceChildren();
+  elements.prayerArchiveList.replaceChildren();
+  elements.prayerCategoryList.replaceChildren();
+  elements.prayerArchiveCount.textContent = "0 prayers";
+  elements.prayerArchiveEmpty.hidden = false;
+  elements.prayerArchiveEmpty.textContent = "Sign in to load your prayer archive.";
+  elements.pinnedPrayersCard.hidden = true;
+  elements.prayerPassagePreview.hidden = true;
+  elements.prayerPassageResult.replaceChildren();
+  elements.prayerFormPanel.hidden = true;
+  elements.prayerCategoriesPanel.hidden = true;
+  elements.prayerAddToggle.setAttribute("aria-expanded", "false");
+  elements.prayerCategoriesToggle.setAttribute("aria-expanded", "false");
+  elements.prayerForm.reset();
+  elements.prayerNewCategoryField.hidden = true;
+  elements.prayerNewCategory.required = false;
+  elements.prayerSharedEmail.disabled = false;
+  elements.prayerFormMessage.textContent = "";
+  elements.prayerAnsweredForm.reset();
+  if (elements.prayerAnsweredDialog.open) elements.prayerAnsweredDialog.close();
   elements.accountName.value = "";
   elements.accountEmail.textContent = "";
   elements.accountMessage.textContent = "";
@@ -3433,6 +4265,7 @@ function clearSignedOutState() {
   elements.searchCount.textContent = "";
   elements.bookPlanBooks.value = "";
   elements.bookPlanSelectedBooks.replaceChildren();
+  elements.bookPlanPartnerProfiles.replaceChildren();
   elements.completedPlansCount.textContent = "0";
   elements.completedPlansEmpty.hidden = false;
   elements.completedPlansEmpty.textContent = "Sign in to load completed reading plans.";

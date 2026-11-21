@@ -627,6 +627,12 @@ async function readerProfiles() {
   return data || [];
 }
 
+async function registeredReadingPartners() {
+  const { data, error } = await supabase.rpc("registered_reading_partners");
+  if (error) return fail(error, "Could not load registered reading partners");
+  return data || [];
+}
+
 async function createReaderProfile(payload) {
   const user = await currentUser();
   const name = String(payload.name || "").trim();
@@ -854,6 +860,20 @@ function chaptersForOffset(plan, offset) {
 
 function normalizeReadingPlan(payload) {
   const customQueue = payload.reading_mode === "custom";
+  const collaboratorProfileIds = [...new Set((Array.isArray(payload.collaborator_profile_ids)
+    ? payload.collaborator_profile_ids
+    : [])
+    .map((profileId) => String(profileId).trim().toLowerCase()))].sort();
+  const collaboratorUserIds = [...new Set((Array.isArray(payload.collaborator_user_ids)
+    ? payload.collaborator_user_ids
+    : [])
+    .map((userId) => String(userId).trim().toLowerCase()))].sort();
+  if (collaboratorProfileIds.some((profileId) => !UUID_PATTERN.test(profileId))) {
+    throw new Error("Select valid partner profiles.");
+  }
+  if (collaboratorUserIds.some((userId) => !UUID_PATTERN.test(userId))) {
+    throw new Error("Select valid partner accounts.");
+  }
   const requestedTitle = String(payload.title || "").trim();
   const chapterSelections = customQueue ? null : payload.reading_mode === "chapters" ? normalizeChapterSelections(payload.chapter_selections) : null;
   const books = customQueue ? [] : chapterSelections
@@ -912,6 +932,8 @@ function normalizeReadingPlan(payload) {
     interval_days: intervalDays,
     weekdays,
     collaborator_email: collaboratorEmail,
+    collaborator_profile_ids: collaboratorProfileIds,
+    collaborator_user_ids: collaboratorUserIds,
     status: payload.status && ["active", "paused", "completed", "archived"].includes(payload.status) ? payload.status : "active",
     start_date: startDate,
   };
@@ -928,7 +950,7 @@ function generatePlanItems(plan, startDate, sortStart = 0) {
   return Array.from({ length: totalReadings }, (_, index) => ({
     plan_id: plan.id,
     user_id: plan.user_id,
-    profile_id: activeReaderProfileId,
+    profile_id: plan.profile_id ?? null,
     sort_order: sortStart + index,
     scheduled_date: scheduledDateForIndex({ ...plan, start_date: startDate }, index),
     chapter_selections: planItemSelections(plan, index),
@@ -937,27 +959,27 @@ function generatePlanItems(plan, startDate, sortStart = 0) {
 }
 
 async function fetchReadingPlans() {
-  const columns = "id,title,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,status,collaborator_email,owner_email,user_id,created_at";
+  const user = await currentUser();
+  const columns = "id,title,books,chapter_selections,chapters_per_reading,interval_days,start_date,weekdays,cadence_type,status,collaborator_email,collaborator_profile_ids,collaborator_user_ids,profile_id,owner_email,user_id,created_at";
   let query = supabase.from("study_reading_plans").select(columns).order("created_at");
   query = activeReaderProfileId
-    ? query.eq("profile_id", activeReaderProfileId)
-    : query.is("profile_id", null);
+    ? query.or(`profile_id.eq.${activeReaderProfileId},collaborator_profile_ids.cs.{${activeReaderProfileId}},collaborator_user_ids.cs.{${user.id}}`)
+    : query.or(`profile_id.is.null,collaborator_user_ids.cs.{${user.id}}`);
   const { data, error } = await query;
   if (error) return fail(error, "Could not load book reading plans");
   return data || [];
 }
 
-async function allPlanItems() {
+async function allPlanItems(planIds) {
+  if (!planIds.length) return [];
   const rows = [];
   const pageSize = 1000;
   for (let offset = 0; ; offset += pageSize) {
     let query = supabase.from("study_reading_plan_items")
       .select("id,plan_id,user_id,sort_order,scheduled_date,chapter_selections,status,completed_date,notes")
       .order("plan_id").order("sort_order").order("id")
+      .in("plan_id", planIds)
       .range(offset, offset + pageSize - 1);
-    query = activeReaderProfileId
-      ? query.eq("profile_id", activeReaderProfileId)
-      : query.is("profile_id", null);
     const { data, error } = await query;
     if (error) return fail(error, "Could not load reading plan items");
     rows.push(...(data || []));
@@ -1018,13 +1040,13 @@ async function ensureLegacyPlanItems(plans, currentItems) {
     }
     populatedPlanIds.add(plan.id);
   }
-  return allPlanItems();
+  return allPlanItems(plans.map((plan) => plan.id));
 }
 
 async function bookReadingPlans(date = dateKeyInNewYork()) {
   if (!validDateKey(date)) throw new Error("Use a valid reading plan date.");
   const plans = await fetchReadingPlans();
-  const planItems = await ensureLegacyPlanItems(plans, await allPlanItems());
+  const planItems = await ensureLegacyPlanItems(plans, await allPlanItems(plans.map((plan) => plan.id)));
   const itemsByPlan = new Map();
   for (const item of planItems) {
     const rows = itemsByPlan.get(item.plan_id) || [];
@@ -1058,6 +1080,8 @@ async function bookReadingPlans(date = dateKeyInNewYork()) {
           reference: formatChapterSelections(item.chapter_selections),
           chapter_selections: item.chapter_selections,
           collaborator_email: plan.collaborator_email || null,
+          collaborator_profile_ids: plan.collaborator_profile_ids || [],
+          collaborator_user_ids: plan.collaborator_user_ids || [],
         }));
     }
     const pending = queue.filter((item) => item.status === "pending");
@@ -1251,22 +1275,18 @@ async function saveBookReadingPlan(payload, id = "") {
   const user = await currentUser();
   const normalized = normalizeReadingPlan(payload);
   const { books, chapter_selections: chapterSelections, ...metadata } = normalized;
-  const planValues = {
-    ...metadata,
-    user_id: user.id,
-    owner_email: user.email || null,
-    profile_id: activeReaderProfileId,
-  };
   let planId = id;
+  let current = null;
   let planOwnerId = user.id;
   let planOwnerEmail = user.email || null;
   let previousStatus = "active";
   let oldPendingIds = [];
   if (id) {
-    const { data: current, error: currentError } = await supabase.from("study_reading_plans")
-      .select("id,status,user_id,owner_email").eq("id", id).maybeSingle();
+    const { data, error: currentError } = await supabase.from("study_reading_plans")
+      .select("id,status,user_id,owner_email,profile_id,collaborator_email,collaborator_user_ids").eq("id", id).maybeSingle();
     if (currentError) return fail(currentError, "Could not load book reading plan");
-    if (!current) throw new Error("Reading plan not found or you do not have permission to edit it.");
+    if (!data) throw new Error("Reading plan not found or you do not have permission to edit it.");
+    current = data;
     previousStatus = current.status || "active";
     if (previousStatus === "completed") previousStatus = "active";
     planOwnerId = current.user_id;
@@ -1275,7 +1295,23 @@ async function saveBookReadingPlan(payload, id = "") {
       .select("id").eq("plan_id", id).eq("status", "pending");
     if (pendingError) return fail(pendingError, "Could not load remaining reading plan items");
     oldPendingIds = (pending || []).map((item) => item.id);
-  } else {
+  }
+  const planProfileId = id ? current.profile_id : activeReaderProfileId;
+  const collaboratorProfileIds = normalized.collaborator_profile_ids
+    .filter((profileId) => profileId !== planProfileId);
+  const collaboratorUserIds = normalized.collaborator_user_ids;
+  const planValues = {
+    ...metadata,
+    collaborator_email: payload.collaborator_email === undefined
+      ? current?.collaborator_email || null
+      : normalized.collaborator_email,
+    collaborator_profile_ids: collaboratorProfileIds,
+    collaborator_user_ids: collaboratorUserIds,
+    user_id: user.id,
+    owner_email: user.email || null,
+    profile_id: planProfileId,
+  };
+  if (!id) {
     const { data, error } = await supabase.from("study_reading_plans")
       .insert(planValues).select("id").single();
     if (error) return fail(error, "Could not save book reading plan");
@@ -1372,6 +1408,7 @@ async function toggleBookReading(itemId, date) {
   const { data, error } = await supabase.rpc("toggle_study_reading_plan_item", {
     p_item_id: itemId,
     p_read_date: date,
+    p_profile_id: activeReaderProfileId,
   });
   if (error) return fail(error, "Could not update reading plan item");
   return { completed: Boolean(data) };
@@ -1684,6 +1721,190 @@ async function esvLookup(reference) {
   return data;
 }
 
+// --- Prayer requests and user-defined prayer categories ---
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SCRIPTURE_BOOK_PATTERN = [...BIBLE_CHAPTER_COUNTS.keys()]
+  .sort((left, right) => right.length - left.length)
+  .map((book) => book.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join("|");
+const SCRIPTURE_REFERENCE_PATTERN = new RegExp(
+  `^(${SCRIPTURE_BOOK_PATTERN})\\s+(\\d{1,3}(?:\\s*[,/]\\s*\\d{1,3}(?!\\s*:))?(?:\\s*:\\s*\\d+(?:\\s*[-–]\\s*\\d+)?)?)$`,
+  "i",
+);
+
+function validateScriptureReference(value) {
+  const reference = String(value || "").trim();
+  if (!reference) return null;
+  if (reference.length > 100) throw new Error("Scripture reference must be 100 characters or fewer.");
+  const match = reference.match(SCRIPTURE_REFERENCE_PATTERN);
+  if (!match) throw new Error("Enter a valid Bible reference, such as Philippians 4:6-7.");
+  const book = canonicalBookName(match[1]);
+  const chapterAndVerses = match[2];
+  const chapterSelection = chapterAndVerses.split(":")[0];
+  normalizeChapterSelections(`${book} ${chapterSelection}`);
+  const verseRange = chapterAndVerses.match(/:\s*(\d+)(?:\s*[-–]\s*(\d+))?$/);
+  if (verseRange && (Number(verseRange[1]) < 1 || Number(verseRange[2] || verseRange[1]) < Number(verseRange[1]))) {
+    throw new Error("Enter a valid verse or verse range in the Scripture reference.");
+  }
+  return reference;
+}
+
+async function listPrayerCategories() {
+  const { data, error } = await supabase.from("prayer_categories")
+    .select("id,user_id,name,created_at")
+    .order("name");
+  if (error) return fail(error, "Could not load prayer categories");
+  return data || [];
+}
+
+async function savePrayerCategory(payload, id = "") {
+  const user = await currentUser();
+  const name = String(payload.name || "").trim();
+  if (!name || name.length > 60) throw new Error("Enter a category name between 1 and 60 characters.");
+  if (id) {
+    if (!UUID_PATTERN.test(id)) throw new Error("Invalid prayer category.");
+    const { error } = await supabase.rpc("rename_prayer_category", { p_category_id: id, p_name: name });
+    if (error) return fail(error, "Could not rename prayer category");
+    const { data, error: readError } = await supabase.from("prayer_categories")
+      .select("id,user_id,name,created_at").eq("id", id).single();
+    if (readError) return fail(readError, "Could not load renamed prayer category");
+    return data;
+  }
+  const { data, error } = await supabase.from("prayer_categories")
+    .insert({ user_id: user.id, name }).select("id,user_id,name,created_at").single();
+  if (error) return fail(error, "Could not save prayer category");
+  return data;
+}
+
+async function deletePrayerCategory(id) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid prayer category.");
+  const { data, error } = await supabase.rpc("delete_prayer_category", { p_category_id: id });
+  if (error) return fail(error, "Could not delete prayer category");
+  return { status: "deleted", id: data || id };
+}
+
+async function listPrayers() {
+  const { data, error } = await supabase.from("prayers")
+    .select("id,user_id,owner_email,shared_with_email,category_name,title,details,scripture_ref,is_pinned,pray_count,last_prayed_at,updates,status,answered_at,answer_note,created_at")
+    .order("created_at", { ascending: false });
+  if (error) return fail(error, "Could not load prayers");
+  return data || [];
+}
+
+async function savePrayer(payload, id = "") {
+  const user = await currentUser();
+  const title = String(payload.title || "").trim();
+  const details = String(payload.details || "");
+  const categoryName = String(payload.category_name || "General").trim();
+  const sharedEmail = String(payload.shared_with_email || "").trim().toLowerCase();
+  if (!title || title.length > 160) throw new Error("Enter a prayer title between 1 and 160 characters.");
+  if (details.length > 8000) throw new Error("Prayer notes must be 8,000 characters or fewer.");
+  if (!categoryName || categoryName.length > 60) throw new Error("Choose a valid prayer category.");
+  if (sharedEmail && !EMAIL_PATTERN.test(sharedEmail)) throw new Error("Enter a valid spouse email address.");
+  const values = {
+    title,
+    details,
+    category_name: categoryName,
+    scripture_ref: validateScriptureReference(payload.scripture_ref),
+    shared_with_email: sharedEmail || null,
+    is_pinned: Boolean(payload.is_pinned),
+  };
+  let query;
+  if (id) {
+    if (!UUID_PATTERN.test(id)) throw new Error("Invalid prayer.");
+    const { data: existing, error: readError } = await supabase.from("prayers")
+      .select("user_id").eq("id", id).single();
+    if (readError) return fail(readError, "Could not load prayer before editing");
+    if (existing.user_id !== user.id) delete values.shared_with_email;
+    query = supabase.from("prayers").update(values).eq("id", id);
+  } else {
+    query = supabase.from("prayers").insert({ ...values, user_id: user.id, owner_email: user.email || null });
+  }
+  const { data, error } = await query
+    .select("id,user_id,owner_email,shared_with_email,category_name,title,details,scripture_ref,is_pinned,pray_count,last_prayed_at,updates,status,answered_at,answer_note,created_at")
+    .single();
+  if (error) return fail(error, "Could not save prayer");
+  return data;
+}
+
+async function markPrayerPrayed(id) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid prayer.");
+  const { data, error } = await supabase.rpc("mark_prayer_prayed", { p_prayer_id: id });
+  if (error) return fail(error, "Could not mark prayer as prayed");
+  return Array.isArray(data) ? data[0] : data;
+}
+
+async function setPrayerPinned(id, isPinned) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid prayer.");
+  const { data, error } = await supabase.from("prayers").update({ is_pinned: Boolean(isPinned) })
+    .eq("id", id).select("id,is_pinned").maybeSingle();
+  if (error) return fail(error, "Could not update prayer pin");
+  if (!data) throw new Error("Prayer not found or you do not have permission to update it.");
+  return data;
+}
+
+async function addPrayerUpdate(id, payload) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid prayer.");
+  const user = await currentUser();
+  const text = String(payload.text || "").trim();
+  if (!text || text.length > 2000) throw new Error("Enter an update between 1 and 2,000 characters.");
+  const { data: prayer, error: readError } = await supabase.from("prayers")
+    .select("updates").eq("id", id).single();
+  if (readError) return fail(readError, "Could not load prayer updates");
+  const updates = Array.isArray(prayer.updates) ? prayer.updates : [];
+  const nextUpdate = {
+    id: crypto.randomUUID(),
+    created_at: new Date().toISOString(),
+    author_email: user.email || "",
+    text,
+  };
+  const { error } = await supabase.from("prayers").update({ updates: [...updates, nextUpdate] }).eq("id", id);
+  if (error) return fail(error, "Could not add prayer update");
+  return nextUpdate;
+}
+
+async function markPrayerAnswered(id, payload) {
+  if (!UUID_PATTERN.test(id) || !validDateKey(String(payload.answered_at || ""))) {
+    throw new Error("Choose a valid date answered.");
+  }
+  const answerNote = String(payload.answer_note || "").trim();
+  if (answerNote.length > 4000) throw new Error("Answer note must be 4,000 characters or fewer.");
+  const { data, error } = await supabase.from("prayers").update({
+    status: "answered",
+    answered_at: payload.answered_at,
+    answer_note: answerNote || null,
+  }).eq("id", id).select("id,status,answered_at,answer_note").single();
+  if (error) return fail(error, "Could not archive answered prayer");
+  return data;
+}
+
+async function reopenPrayer(id) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid prayer.");
+  const { data, error } = await supabase.from("prayers").update({
+    status: "active",
+    answered_at: null,
+    answer_note: null,
+  }).eq("id", id).select("id,status").single();
+  if (error) return fail(error, "Could not reopen prayer");
+  return data;
+}
+
+async function deletePrayer(id) {
+  if (!UUID_PATTERN.test(id)) throw new Error("Invalid prayer.");
+  const { data, error } = await supabase.from("prayers").delete().eq("id", id).select("id").maybeSingle();
+  if (error) return fail(error, "Could not delete prayer");
+  if (!data) throw new Error("Prayer not found or you do not have permission to delete it.");
+  return { status: "deleted", id };
+}
+
+async function answeredPrayerCount() {
+  const user = await currentUser();
+  const { count, error } = await supabase.from("prayers").select("id", { count: "exact", head: true })
+    .eq("user_id", user.id).eq("status", "answered");
+  if (error) return fail(error, "Could not load answered prayer count");
+  return { count: count || 0 };
+}
+
 // --- Note image operations and transcription replacement ---
 async function addImage(path, file) {
   const note = await noteByPath(path);
@@ -1789,7 +2010,28 @@ export async function apiRequest(url, options = {}) {
   const method = (options.method || "GET").toUpperCase();
   const path = parsed.pathname;
   if (path === "/api/reader-profiles" && method === "GET") return readerProfiles();
+  if (path === "/api/reading-plan-partners" && method === "GET") return registeredReadingPartners();
   if (path === "/api/reader-profiles" && method === "POST") return createReaderProfile(JSON.parse(options.body));
+  if (path === "/api/prayer-categories" && method === "GET") return listPrayerCategories();
+  if (path === "/api/prayer-categories" && method === "POST") return savePrayerCategory(JSON.parse(options.body));
+  const prayerCategory = path.match(/^\/api\/prayer-categories\/([0-9a-f-]+)$/i);
+  if (prayerCategory && method === "PUT") return savePrayerCategory(JSON.parse(options.body), prayerCategory[1]);
+  if (prayerCategory && method === "DELETE") return deletePrayerCategory(prayerCategory[1]);
+  if (path === "/api/prayers" && method === "GET") return listPrayers();
+  if (path === "/api/prayers/answered-count" && method === "GET") return answeredPrayerCount();
+  if (path === "/api/prayers" && method === "POST") return savePrayer(JSON.parse(options.body));
+  const prayerAction = path.match(/^\/api\/prayers\/([0-9a-f-]+)\/(prayed|pin|updates|answered|reopen)$/i);
+  if (prayerAction && method === "POST") {
+    const [, id, action] = prayerAction;
+    if (action === "prayed") return markPrayerPrayed(id);
+    if (action === "pin") return setPrayerPinned(id, JSON.parse(options.body).is_pinned);
+    if (action === "updates") return addPrayerUpdate(id, JSON.parse(options.body));
+    if (action === "answered") return markPrayerAnswered(id, JSON.parse(options.body));
+    return reopenPrayer(id);
+  }
+  const prayer = path.match(/^\/api\/prayers\/([0-9a-f-]+)$/i);
+  if (prayer && method === "PUT") return savePrayer(JSON.parse(options.body), prayer[1]);
+  if (prayer && method === "DELETE") return deletePrayer(prayer[1]);
   const readerProfile = path.match(/^\/api\/reader-profiles\/([0-9a-f-]+)$/i);
   if (readerProfile && method === "PUT") return updateReaderProfile(readerProfile[1], JSON.parse(options.body));
   if (readerProfile && method === "DELETE") return deleteReaderProfile(readerProfile[1]);

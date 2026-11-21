@@ -42,6 +42,7 @@
       <nav class="top-nav" aria-label="Main navigation">
         <a class="nav-link active" href="#library" data-view="library" aria-current="page">Library</a>
         <a class="nav-link" href="#today" data-view="today">Today</a>
+        <a class="nav-link" href="#prayers" data-view="prayers">Prayers</a>
         <a class="nav-link" href="#stats" data-view="stats">Stats</a>
         <a class="nav-link" href="./upload.html">Add notes</a>
       </nav>
@@ -315,6 +316,11 @@
             </div>
           </div>
 
+          <section id="pinned-prayers-card" class="today-plan-card panel-card pinned-prayers-card" aria-labelledby="pinned-prayers-title" hidden>
+            <div class="panel-heading"><div><p class="eyebrow">KEEP IN PRAYER</p><h2 id="pinned-prayers-title">Pinned Prayers</h2></div></div>
+            <ul id="pinned-prayers-list" class="pinned-prayers-list" aria-live="polite"></ul>
+          </section>
+
           <!-- Recurring task configuration -->
           <section id="today-task-settings" class="today-task-settings panel-card" hidden>
             <div class="panel-heading"><div><p class="eyebrow">RECURRING ROUTINE</p><h2>Task settings</h2></div></div>
@@ -397,10 +403,11 @@
                 </div>
               </fieldset>
               <label>Start date<input id="book-plan-start-date" type="date" required></label>
-              <label id="book-plan-partner-field" class="book-plan-partner-field">Partner account email (optional)
-                <input id="book-plan-partner-email" type="email" placeholder="e.g. partner@example.com" maxlength="255">
-                <small>Link this plan with another user. Either of you can view and check off readings.</small>
-              </label>
+              <div id="book-plan-partner-field" class="book-plan-partner-field">
+                <span>Share with other profiles (optional)</span>
+                <div id="book-plan-partner-profiles" class="book-plan-partner-options" role="group" aria-label="Available partner profiles and accounts" aria-describedby="book-plan-partner-help"></div>
+                <small id="book-plan-partner-help">Select any profiles you want to share this plan with.</small>
+              </div>
               <div class="book-plan-preview panel-card" id="book-plan-preview">
                 <p class="eyebrow">PLAN PROJECTION</p>
                 <div class="book-plan-preview-content">
@@ -497,6 +504,103 @@
               </form>
             </dialog>
           </details>
+        </section>
+
+        <section id="prayers-view" class="workspace-view" aria-labelledby="prayers-title" hidden>
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">KEEP WATCH IN PRAYER</p>
+              <h1 id="prayers-title">Prayers</h1>
+              <p class="subheading">Remember each request, notice how God answers, and give thanks.</p>
+            </div>
+            <div class="note-actions">
+              <button class="button button-quiet" id="prayer-categories-toggle" type="button" aria-expanded="false" aria-controls="prayer-categories-panel">Manage categories</button>
+              <button class="button button-primary" id="prayer-add-toggle" type="button" aria-expanded="false" aria-controls="prayer-form-panel">Add prayer</button>
+            </div>
+          </div>
+
+          <section id="prayer-form-panel" class="panel-card prayer-form-panel" hidden>
+            <div class="panel-heading"><div><p class="eyebrow">PRAYER REQUEST</p><h2 id="prayer-form-title">Add a prayer</h2></div></div>
+            <form id="prayer-form" class="prayer-form">
+              <input id="prayer-edit-id" type="hidden">
+              <label>Title<input id="prayer-title" maxlength="160" required placeholder="What are you praying for?"></label>
+              <label>Request notes<textarea id="prayer-details" rows="3" placeholder="Add context or details"></textarea></label>
+              <label>Category
+                <select id="prayer-category" required>
+                  <option value="General">General</option>
+                  <option value="__new_category__">Create a new category…</option>
+                </select>
+              </label>
+              <label id="prayer-new-category-field" hidden>New category name<input id="prayer-new-category" maxlength="60" placeholder="Category name"></label>
+              <label>Scripture reference (optional)<input id="prayer-scripture-ref" maxlength="100" placeholder="Philippians 4:6-7"></label>
+              <label>Share with spouse email (optional)<input id="prayer-shared-email" type="email" maxlength="254" placeholder="spouse@example.com"></label>
+              <label class="prayer-pin-option"><input id="prayer-pin" type="checkbox"> Pin to top</label>
+              <div class="prayer-form-actions">
+                <button class="button button-primary" id="prayer-save-button" type="submit">Save prayer</button>
+                <button class="button button-quiet" id="prayer-cancel-edit" type="button">Cancel</button>
+              </div>
+              <p class="muted prayer-form-message" id="prayer-form-message" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+
+          <section id="prayer-categories-panel" class="panel-card prayer-categories-panel" hidden>
+            <div class="panel-heading"><div><p class="eyebrow">ORGANIZE REQUESTS</p><h2>Manage categories</h2></div></div>
+            <form id="prayer-category-form" class="prayer-category-form">
+              <label>Category name<input id="prayer-category-name" maxlength="60" required placeholder="e.g. Family"></label>
+              <button class="button button-primary" type="submit">Add category</button>
+            </form>
+            <ul id="prayer-category-list" class="prayer-category-list" aria-live="polite"></ul>
+            <p class="muted prayer-category-message" id="prayer-category-message" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="panel-card prayer-controls" aria-label="Filter and sort prayers">
+            <label>Category
+              <select id="prayer-filter-category"><option value="all">All</option></select>
+            </label>
+            <label>Search
+              <input id="prayer-search" type="search" placeholder="Search prayers">
+            </label>
+            <label>Sort by
+              <select id="prayer-sort">
+                <option value="least-recent">Pinned + Least recently prayed</option>
+                <option value="newest">Pinned + Newest</option>
+                <option value="oldest">Pinned + Oldest</option>
+              </select>
+            </label>
+          </section>
+          <p id="prayers-status" class="empty-state prayers-status" role="status" aria-live="polite" hidden></p>
+          <section id="prayer-passage-preview" class="panel-card prayer-passage-preview" hidden aria-live="polite">
+            <div class="panel-heading">
+              <div><p class="eyebrow">SCRIPTURE</p><h2 id="prayer-passage-title">Passage</h2></div>
+              <button class="button button-quiet" id="prayer-passage-close" type="button">Close</button>
+            </div>
+            <div class="esv-result prayer-passage-result" id="prayer-passage-result"></div>
+          </section>
+          <div id="active-prayer-list" class="active-prayer-list" aria-live="polite"></div>
+          <details class="panel-card prayer-archive">
+            <summary><span>Prayer Archive</span><span class="prayer-archive-count" id="prayer-archive-count"></span></summary>
+            <p class="empty-state" id="prayer-archive-empty" hidden></p>
+            <div id="prayer-archive-list" class="prayer-archive-list"></div>
+          </details>
+
+          <dialog id="prayer-answered-dialog" class="continue-plan-dialog prayer-answered-dialog">
+            <form id="prayer-answered-form" class="continue-plan-form">
+              <input id="prayer-answered-id" type="hidden">
+              <h3>God Answered</h3>
+              <p class="muted">Record the date and how God answered this prayer.</p>
+              <label for="prayer-answered-date">Date answered
+                <input id="prayer-answered-date" type="date" required>
+              </label>
+              <label for="prayer-answer-note">Answer / Praise Note
+                <textarea id="prayer-answer-note" rows="4" placeholder="Share the answer or a note of praise"></textarea>
+              </label>
+              <p class="muted prayer-answer-message" id="prayer-answer-message" role="status" aria-live="polite"></p>
+              <div class="continue-plan-actions">
+                <button type="submit" class="button button-primary" id="prayer-answer-submit">Move to archive</button>
+                <button type="button" class="button button-quiet" id="prayer-answer-cancel">Cancel</button>
+              </div>
+            </form>
+          </dialog>
         </section>
 
         <!-- Reading totals, scripture coverage, and per-chapter history -->
