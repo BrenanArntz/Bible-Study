@@ -2189,6 +2189,7 @@ function renderPlanQueue(plan) {
   list.className = "plan-item-editor-list";
   list.setAttribute("aria-label", `${plan.title} queued readings`);
   const pendingItems = plan.plan_items.filter((item) => item.status === "pending");
+  const profile = state.readerProfiles.find((readerProfile) => readerProfile.id === state.activeProfileId);
   plan.plan_items.forEach((item) => {
     const row = document.createElement("li");
     row.className = `plan-item-editor plan-item-${item.status}`;
@@ -2238,7 +2239,9 @@ function renderPlanQueue(plan) {
       remove.type = "button";
       remove.className = "button button-danger";
       remove.textContent = "Remove";
-      remove.disabled = profile.owner_user_id !== state.userId;
+      remove.disabled = profile
+        ? profile.owner_user_id !== state.userId
+        : plan.user_id !== state.userId;
       remove.addEventListener("click", () => removePlanItem(item));
       row.append(skip, up, down, remove);
     } else if (item.status === "skipped") {
